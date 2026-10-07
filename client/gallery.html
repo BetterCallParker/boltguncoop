@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Lanternbound - Art Gallery</title>
+<style>
+  body { background: #1b1a2a; color: #e8dcc0; font-family: Georgia, serif; margin: 16px; }
+  h2 { font-weight: normal; letter-spacing: 2px; color: #e8c46a; margin: 18px 0 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  canvas { image-rendering: pixelated; background: #2a2a3e; border: 1px solid #3a3a52; }
+  .lab { font-size: 12px; text-align: center; }
+</style>
+</head>
+<body>
+<h2>Travelers</h2><div id="trav"></div>
+<h2>Props</h2><div class="row" id="props"></div>
+<h2>Textures</h2><div class="row" id="tex"></div>
+<script type="module">
+import { travelerSheet, treeSprite, grassTuft, flowerSprite, campfireSheet, lanternPost, groundTexture, stoneBrickTexture, portraitCanvas } from './js/sprites.js';
+import { CHARACTERS } from '/shared/characters.js';
+const up = (cv, s) => { const c = document.createElement('canvas'); c.width = cv.width * s; c.height = cv.height * s; const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cv, 0, 0, c.width, c.height); return c; };
+const trav = document.getElementById('trav');
+CHARACTERS.forEach((ch, i) => {
+  const row = document.createElement('div'); row.className = 'row';
+  row.appendChild(portraitCanvas(i, 3));
+  row.appendChild(up(travelerSheet(i).canvas, 3));
+  const l = document.createElement('div'); l.className = 'lab'; l.textContent = ch.name + ' - ' + ch.title; row.appendChild(l);
+  trav.appendChild(row);
+});
+const props = document.getElementById('props');
+for (const [k, pal] of [['oak', 'summer'], ['oak', 'autumn'], ['pine', 'summer'], ['pine', 'snow'], ['dead', 'x'], ['bush', 'summer']]) props.appendChild(up(treeSprite(k, 3, pal).toCanvas(), 3));
+props.appendChild(up(campfireSheet().toCanvas(), 3));
+props.appendChild(up(lanternPost().toCanvas(), 3));
+for (let i = 0; i < 4; i++) props.appendChild(up(grassTuft(i + 1).toCanvas(), 4));
+for (let i = 0; i < 4; i++) props.appendChild(up(flowerSprite(i + 1).toCanvas(), 4));
+const tex = document.getElementById('tex');
+for (const k of ['grass', 'snow', 'stone', 'dirt']) tex.appendChild(up(groundTexture(k, 128).toCanvas(), 2));
+tex.appendChild(up(stoneBrickTexture().toCanvas(), 3));
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Lanternbound - Traveler Sprites</title>
+<style>
+  body { background: #2a2e26; color: #e8dcc0; font-family: Georgia, serif; margin: 14px; }
+  h2 { font-weight: normal; letter-spacing: 2px; color: #e8c46a; margin: 10px 0 6px; font-size: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(2, auto); gap: 10px 22px; justify-content: start; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  canvas { image-rendering: pixelated; }
+  .lab { font-size: 13px; }
+  .row { display: flex; gap: 4px; align-items: flex-end; }
+  .bg { background: linear-gradient(#6e7a46, #55603a); padding: 6px 10px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h2>Lanternbound travelers &middot; front &middot; walk &middot; side &middot; side walk &middot; back</h2>
+<div class="grid" id="g"></div>
+<script type="module">
+import { travelerSheet, FW, FH, VIEW_BASE } from './js/travelers.js';
+import { CHARACTERS } from '/shared/characters.js';
+const g = document.getElementById('g');
+function frame(ci, f, s) {
+  const src = travelerSheet(ci).canvas;
+  const c = document.createElement('canvas');
+  c.width = FW * s; c.height = FH * s;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = false;
+  x.drawImage(src, f * FW, 0, FW, FH, 0, 0, FW * s, FH * s);
+  return c;
+}
+CHARACTERS.forEach((ch, i) => {
+  const cell = document.createElement('div'); cell.className = 'cell';
+  const row = document.createElement('div'); row.className = 'row bg';
+  for (const f of [VIEW_BASE.front, VIEW_BASE.front + 2, VIEW_BASE.side, VIEW_BASE.side + 2, VIEW_BASE.back]) row.appendChild(frame(i, f, +(new URL(location.href).searchParams.get('s') || 3)));
+  cell.appendChild(row);
+  const l = document.createElement('div'); l.className = 'lab'; l.textContent = ch.name + ' - ' + ch.title; cell.appendChild(l);
+  g.appendChild(cell);
+});
+</script>
+</body>
+</html>
