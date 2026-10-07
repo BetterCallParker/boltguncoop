@@ -343,6 +343,34 @@ const PAINT = {
     for (const [x, h] of [[37.5, 3], [40, 5], [42, 7], [44, 5], [46.5, 3]]) D.poly([[x - 1, 9.5 + b], [x, 9.5 + b - h], [x + 1, 9.5 + b]], gold, { base: 0.6 });
     D.put(42, 7 + b, '#ff5ad8');
   } },
+  // ---- allies summoned by travelers
+  wolf: { w: 30, h: 22, frames: 4, fps: 10, paint(D, f) {
+    const fur = R('#9ad0ff'), dark = R('#5a8ac8');
+    const st = [2, 0, -2, 0][f], by = f % 2 ? -1 : 0;
+    D.cyl(9, 13 + by, 1.4, 8 - st, 21, 1.1, dark, { bias: -0.3 });
+    D.cyl(20, 13 + by, 1.4, 21 + st, 21, 1.1, dark, { bias: -0.3 });
+    D.poly([[3, 9 + by], [0, 6 + by], [2, 11 + by]], fur, { base: 0.2 });
+    D.ell(14, 12 + by, 9, 4.6, fur, { bias: 0.05 });
+    D.cyl(10, 14 + by, 1.5, 10 + st, 21, 1.2, fur);
+    D.cyl(19, 14 + by, 1.5, 19 - st, 21, 1.2, fur);
+    D.ell(24, 8 + by, 4.4, 3.8, fur, { bias: 0.1 });
+    D.poly([[26, 9 + by], [30, 10 + by], [27, 12 + by]], fur, { base: 0.3 });
+    D.poly([[21, 5 + by], [22, 0 + by], [24, 5 + by]], fur, { base: 0.4 });
+    D.put(25, 7 + by, '#ffffff');
+    D.put(25, 8 + by, '#1a3a6a');
+  } },
+  turret: { w: 26, h: 26, frames: 2, fps: 4, paint(D, f) {
+    const wood = R('#8a5a32'), iron = R('#6a6a7a'), brass = R('#c8a050');
+    D.cyl(8, 16, 1, 4, 25, 0.9, wood, { bias: -0.2 });
+    D.cyl(18, 16, 1, 22, 25, 0.9, wood, { bias: -0.2 });
+    D.cyl(13, 16, 1, 13, 25, 0.9, wood);
+    D.ell(13, 15, 5, 3, iron);
+    D.box(5, 10 + (f ? 0.5 : 0), 17, 3, wood, { base: 0.3 });
+    D.box(20, 10.5, 4, 2, iron, { base: 0.4 });
+    D.cyl(6, 7, 0.8, 6, 16, 0.8, wood);
+    D.ell(13, 7, 3, 2.6, brass, { bias: 0.2 });
+    D.put(13, 6, '#ffe08a');
+  } },
   brazier: { w: 22, h: 30, frames: 3, fps: 9, paint(D, f, pal) {
     const iron = R('#4a4450');
     D.cyl(7, 18, 0.7, 4, 29, 0.6, iron);
@@ -375,6 +403,7 @@ export function buildEnemyAtlas() {
     const frames = paintFrames(def.sprite, def.pal || 'base');
     entries.push({ typeIndex, id, frames, fps: PAINT[def.sprite].fps });
   });
+  for (const m of ['wolf', 'turret']) entries.push({ minion: m, id: m, frames: paintFrames(m, 'base'), fps: PAINT[m].fps });
   const items = [];
   for (const e of entries) for (const fr of e.frames) items.push({ e, fr });
   items.sort((a, b) => b.fr.h - a.fr.h);
@@ -391,14 +420,17 @@ export function buildEnemyAtlas() {
   const atlas = new Pix(W, H);
   for (const it of items) atlas.blit(it.fr, it.x, it.y);
   const types = [];
+  const minions = {};
   for (const e of entries) {
     const rects = e.frames.map((fr) => {
       const it = items.find((q) => q.fr === fr);
       return { u: it.x / W, v: 1 - (it.y + fr.h) / H, du: fr.w / W, dv: fr.h / H, w: fr.w, h: fr.h };
     });
-    types[e.typeIndex] = { id: e.id, rects, fps: e.fps };
+    if (e.minion) minions[e.minion] = { id: e.minion, rects, fps: e.fps };
+    else types[e.typeIndex] = { id: e.id, rects, fps: e.fps };
   }
-  return { canvas: atlas.toCanvas(), types, W, H };
+  minions.skeleton = types[ENEMY_IDS.indexOf('skeleton')];
+  return { canvas: atlas.toCanvas(), types, minions, W, H };
 }
 
 // ------------------------------------------------------------------ FX / pickup atlas
@@ -432,6 +464,22 @@ function fxPix(kind) {
     case 'leaf': p.poly([[2, 12], [6, 5], [13, 3], [10, 10]], '#ffffff'); p.line(3, 12, 11, 5, '#c8c8c8'); return p;
     case 'flame': p.poly([[8, 1], [12, 8], [12, 12], [8, 15], [4, 12], [4, 8]], '#ffd88a'); p.poly([[8, 6], [10.5, 10], [8, 14], [5.5, 10]], '#ffffff'); return p;
     case 'px': p.rect(0, 0, 16, 16, '#ffffff'); return p;
+    case 'bone': p.line(3, 8, 12, 8, '#efe6d0'); p.line(3, 7, 12, 7, '#fffaf0'); p.ellipse(2.5, 7.5, 1.6, 1.6, '#efe6d0'); p.ellipse(13, 7.5, 1.4, 1.4, '#fffaf0'); p.set(14, 7, '#ffffff'); break;
+    case 'pellet': p.ellipse(8, 8, 2.6, 2.6, '#8a8a96'); p.ellipse(7.5, 7.5, 1.4, 1.4, '#d8d8e4'); break;
+    case 'icespear': p.line(1, 8, 12, 8, '#9ad8ff'); p.line(1, 7, 11, 7, '#e8faff'); p.poly([[11, 6], [15, 7.5], [11, 9]], '#ffffff'); break;
+    case 'spear': p.line(0, 8, 11, 8, '#8a5a32'); p.line(0, 7, 11, 7, '#b8864a'); p.poly([[10, 5.5], [15, 7.5], [10, 9.5]], '#dfe6f2'); p.set(11, 7, '#ffffff'); break;
+    case 'shuriken': p.poly([[8, 1], [9.5, 6.5], [15, 8], [9.5, 9.5], [8, 15], [6.5, 9.5], [1, 8], [6.5, 6.5]], '#b8c0d4'); p.ellipse(8, 8, 1.5, 1.5, '#3a3a4a'); p.line(8, 2, 9, 6, '#ffffff'); break;
+    case 'frostorb': p.ellipse(8, 8, 6, 6, '#4aa8ff'); p.ellipse(7.5, 7.5, 4.2, 4.2, '#9ad8ff'); p.ellipse(6.5, 6.5, 2, 2, '#ffffff'); p.set(12, 4, '#e8faff'); p.set(3, 11, '#e8faff'); break;
+    case 'ball': p.ellipse(8, 8, 5.5, 5.5, '#6ab0ff'); p.ellipse(8, 8, 3.6, 3.6, '#d8f0ff'); p.ellipse(7.5, 7.5, 1.8, 1.8, '#ffffff'); p.line(1, 3, 4, 6, '#ffffff'); p.line(15, 12, 12, 10, '#ffffff'); break;
+    case 'bee': p.ellipse(8, 9, 4, 3, '#f0c83a'); p.rect(7, 6.5, 1, 5, '#2a2018'); p.rect(9.5, 6.5, 1, 5, '#2a2018'); p.ellipse(7, 5.5, 2.4, 1.6, '#e8f6ff'); p.ellipse(10, 5.5, 2.4, 1.6, '#e8f6ff'); p.set(12, 9, '#2a2018'); break;
+    case 'feather': p.poly([[1, 9], [8, 5], [15, 7], [9, 10]], '#d8ecff'); p.line(1, 9, 15, 7, '#ffffff'); p.set(14, 6, '#ffe08a'); break;
+    case 'hammer': p.line(3, 13, 9, 7, '#8a5a32'); p.poly([[7, 3], [13, 2], [15, 7], [9, 8]], '#f0c84a'); p.line(13, 2, 15, 7, '#fff4c0'); p.set(10, 4, '#ffffff'); break;
+    case 'shell': p.ellipse(8, 8, 4, 3, '#4a4a56'); p.rect(5, 6, 2, 4, '#c8a050'); p.ellipse(10, 7, 1.4, 1, '#8a8a96'); break;
+    case 'hexorb': p.ellipse(8, 8, 5, 5, '#5a1a6a'); p.ellipse(8, 8, 3.4, 3.4, '#b05aff'); p.ellipse(7.5, 7.5, 1.4, 1.4, '#f0d0ff'); break;
+    case 'trap': p.ellipse(8, 9, 6.5, 3.5, '#5a5464'); p.ellipse(8, 9, 4.8, 2.4, '#2a2632'); for (let x = 2; x <= 14; x += 2) { p.set(x, 7, '#c8c2d2'); p.set(x, 11, '#c8c2d2'); } p.ellipse(8, 9, 1.4, 1, '#ff5a3a'); break;
+    case 'void': p.ellipse(8, 8, 6, 6, '#1a0a2a'); p.ellipse(8, 8, 4, 4, '#3a1a5a'); for (let a = 0; a < 6.28; a += 0.25) p.set(8 + Math.cos(a) * 6.4, 8 + Math.sin(a) * 6.4, '#c08aff'); p.ellipse(8, 8, 1.2, 1.2, '#000000'); break;
+    case 'wind': for (let k = 0; k < 3; k++) for (let a = 0; a < 5; a += 0.15) p.set(8 + Math.cos(a + k * 2.1) * (2 + a * 1.1), 8 + Math.sin(a + k * 2.1) * (1.4 + a * 0.8), k ? '#d8f4ff' : '#ffffff'); break;
+    case 'note': p.ellipse(6, 11, 2.4, 1.8, '#ffe08a'); p.line(8, 11, 8, 3, '#ffe08a'); p.line(8, 3, 12, 5, '#ffe08a'); break;
   }
   p.outline('#120c1c', 0.3);
   return p;
@@ -440,7 +488,8 @@ function fxPix(kind) {
 const ICON_FX = new Set(['gem1', 'gem2', 'gem3', 'roast', 'coin', 'bag', 'lodestone', 'freeze', 'starfall', 'chest']);
 export const FX_KINDS = ['bolt', 'storm', 'knife', 'edge', 'orb', 'axe', 'wisp', 'chakram', 'flask', 'meteor', 'eorb', 'dark', 'glow', 'spark', 'ring',
   'gem1', 'gem2', 'gem3', 'roast', 'coin', 'bag', 'lodestone', 'freeze', 'starfall', 'chest',
-  'smoke', 'shard', 'star', 'dot', 'bubble', 'leaf', 'flame', 'px'];
+  'smoke', 'shard', 'star', 'dot', 'bubble', 'leaf', 'flame', 'px',
+  'bone', 'pellet', 'icespear', 'spear', 'shuriken', 'frostorb', 'ball', 'bee', 'feather', 'hammer', 'shell', 'hexorb', 'trap', 'void', 'wind', 'note'];
 
 export function buildFxAtlas() {
   const cols = 8;

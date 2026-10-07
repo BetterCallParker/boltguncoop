@@ -7,6 +7,7 @@ export class Guild {
   constructor() {
     this.gold = 0;
     this.ranks = {};
+    this.stage = 0; // highest stage unlocked (stages unlock as you beat them)
     this.load();
   }
 
@@ -15,11 +16,12 @@ export class Guild {
       const d = JSON.parse(localStorage.getItem(KEY) || '{}');
       this.gold = Math.max(0, Math.floor(d.gold || 0));
       this.ranks = sanitizeMeta(d.ranks);
+      this.stage = Math.max(0, Math.floor(d.stage || 0));
     } catch { /* storage blocked */ }
   }
 
   save() {
-    try { localStorage.setItem(KEY, JSON.stringify({ gold: this.gold, ranks: this.ranks })); } catch { /* ignore */ }
+    try { localStorage.setItem(KEY, JSON.stringify({ gold: this.gold, ranks: this.ranks, stage: this.stage })); } catch { /* ignore */ }
   }
 
   rank(id) {
@@ -48,6 +50,14 @@ export class Guild {
     this.gold += back;
     this.ranks = {};
     this.save();
+  }
+
+  // returns true when this actually unlocked something new
+  unlockStage(i) {
+    if (i <= this.stage) return false;
+    this.stage = i;
+    this.save();
+    return true;
   }
 
   addGold(n) {

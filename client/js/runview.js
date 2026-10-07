@@ -31,8 +31,8 @@ export function isRunPhase(ph) {
 }
 
 export class RunView {
-  constructor({ R, world, net, input, audio, guild, local, app, toast, view }) {
-    Object.assign(this, { R, world, net, input, audio, guild, local, app, toast, view });
+  constructor({ R, world, net, input, audio, guild, local, app, toast, view, options }) {
+    Object.assign(this, { R, world, net, input, audio, guild, local, app, toast, view, options });
     this.active = false;
     this.hud = new Hud({ send: (m) => net.send(m), sfx: (n) => audio.play(n) });
     this.hud.onAction = (a) => { if (a === 'lobby') net.send({ t: 'lobby' }); };
@@ -169,6 +169,8 @@ export class RunView {
       if (st !== P.state && st === PS.DOWNED) P.view.flash = 0;
       P.state = st;
       P.revive = row[7]; P.iframes = row[8]; P.gold = row[9]; P.kills = row[10];
+      P.shield = row[11] || 0; P.respawnIn = row[12] || 0;
+      P.boneHP = row[13] || 0; P.boneMax = row[14] || 0; P.buffed = row[15] || 0;
     }
     for (const e of j.ev) this.event(e, s);
     if (prevPh === PHASE.LEVELUP && j.ph !== PHASE.LEVELUP) this.hud.hideLevelUp();
@@ -205,11 +207,22 @@ export class RunView {
       case 'ex': fx.explosion(e[1], e[2], e[3], e[4]); A.play(e[4] === 'meteor' ? 'meteor' : 'boom'); break;
       case 'mt': fx.meteorIncoming(e[1], e[2], e[3], e[4]); A.play('whoosh'); break;
       case 'zn': fx.zone(e[1], e[2], e[3], e[4], e[5], e[6]); A.play('splash'); break;
-      case 'zap': fx.zap(e[1], e[2], e[3], e[4]); A.play('zap'); break;
+      case 'zap': fx.zap(e[1], e[2], e[3], e[4], e[5]); A.play(e[5] === 'holy' ? 'heal' : 'zap'); break;
+      case 'spin': { const p = P(e[1]); if (p) { fx.spin(e[1], e[2], e[3], e[4], e[5]); A.play('whoosh'); } break; }
+      case 'beam': fx.beam(e[1], e[2], e[3], e[4], e[5], e[6], e[7]); A.play('zap'); break;
+      case 'cone': fx.cone(e[1], e[2], e[3], e[4], e[5], e[6]); A.play('fire'); break;
+      case 'rain': fx.rain(e[1], e[2], e[3], e[4], e[5]); A.play('whoosh'); break;
+      case 'fis': fx.fissure(e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9]); A.play('quake'); break;
+      case 'mine': fx.mine(e[1], e[2], e[3], e[4]); break;
+      case 'md': fx.mineGone(e[1]); break;
+      case 'summon': fx.summonPuff(e[3], e[4], e[2]); A.play('wisp'); break;
+      case 'unsummon': break;
+      case 'buff': fx.buff(e[1], e[2], e[3]); A.play('levelup'); break;
+      case 'blk': { const p = P(e[1]); if (p) { fx.sparkleAt(p.x, p.z, [1, 0.95, 0.8], 5); if (p.local) A.play('crack'); } break; }
       case 'arc': fx.arc(e[1], e[2], e[3], e[4]); break;
       case 'nv': {
         const p = P(e[1]);
-        if (p) { fx.nova(p.x, p.z, e[2], e[3]); A.play('frost'); }
+        if (p) { fx.nova(p.x, p.z, e[2], e[3], e[4]); A.play(e[4] === 'quake' || e[4] === 'shout' ? 'quake' : e[4] === 'thorn' || e[4] === 'bone' ? 'slash' : e[4] === 'song' ? 'heal' : 'frost'); }
         break;
       }
       case 'es': ents.shot(e, s.time); break;
@@ -257,16 +270,21 @@ export class RunView {
         const p = P(e[1]);
         if (!p) break;
         A.play('down');
-        hud.feed(`<b>${p.name}</b> has fallen!${e[2] ? ' Stand beside them to revive.' : ''}`);
+        hud.feed(`<b>${p.name}</b> has fallen!${e[2] ? ' Hold out and they return in 30 seconds.' : ''}`);
         break;
       }
       case 'up': {
         const p = P(e[1]), by = P(e[2]);
         if (!p) break;
+        if (e[3] !== undefined) {
+          // back on their feet next to an ally
+          p.x = p.sx = e[3]; p.z = p.sz = e[4];
+          p.view.root.position.set(p.x, 0, p.z);
+        }
         fx.sparkleAt(p.x, p.z, [1.4, 1.3, 0.6], 16);
         fx.holyBurst(p.x, p.z, 2.2);
         A.play('revive');
-        hud.feed(by ? `<b>${by.name}</b> revived <b>${p.name}</b>!` : `<b>${p.name}</b> is back on their feet!`);
+        hud.feed(`<b>${p.name}</b> is back in the fight!`);
         break;
       }
       case 'rv': {
@@ -366,6 +384,10 @@ export class RunView {
     if (!this.goldBanked) {
       this.goldBanked = true;
       for (const st of stats) if (this.local.has(st.id)) this.guild.addGold(st.gold);
+      if (result === 'victory' && this.local.size && this.guild.unlockStage(this.stageIndex + 1)) {
+        const next = STAGES[this.stageIndex + 1];
+        if (next) setTimeout(() => this.toast(`New stage unlocked: ${next.name}!`, 6000), 1500);
+      }
     }
     this.hud.results(result, stats, t, level, kills, { players: this.players, local: this.local, isHost: this.app.host === this.net.cid });
     this.audio.music(result === 'victory' ? 'victory' : 'defeat', this.stageIndex);
@@ -375,6 +397,7 @@ export class RunView {
 
   // ---------------------------------------------------------------- feel
   shake(a, x, z) {
+    a *= this.options ? this.options.s.shake : 1;
     if (x !== undefined) {
       const d = Math.hypot(x - this.focus.x, z - this.focus.z);
       if (d > 18) return;
@@ -392,6 +415,7 @@ export class RunView {
     return {
       dt, rt, br, time, paused: this.phase !== PHASE.RUN,
       playerPos: (pid) => this.players.get(pid) || null,
+      playerColor: (pid) => { const P = this.players.get(pid); return P ? (P.col || (P.col = new THREE.Color(P.color))) : null; },
       ownerOffset: (pid) => {
         const P = this.players.get(pid);
         return P && P.local && P.init ? { x: P.x - P.sx, z: P.z - P.sz } : null;
@@ -433,12 +457,24 @@ export class RunView {
       const pulse = P.local ? 0.7 : 0.45;
       const c = P.col || (P.col = new THREE.Color(P.color));
       this.ents.flatL.push(P.x, 0.04, P.z, 1.15, 1.0, this.ents.fx.ring, false, c.r * pulse, c.g * pulse, c.b * pulse, 1);
+      if (P.boneHP > 0 && P.state === PS.ALIVE) {
+        const k = 0.35 + 0.45 * (P.boneHP / Math.max(1, P.boneMax));
+        this.ents.glowL.push(P.x, 1.1, P.z, 2.6, 2.6, this.ents.fx.ring, false, 0.95 * k, 0.9 * k, 0.75 * k, 1);
+      }
+      if (P.shield > 0 && P.state === PS.ALIVE) {
+        // respawn shield: a golden dome that flickers out in its last second
+        const k = P.shield < 1 ? (Math.floor(time * 12) % 2 ? 0.35 : 0.8) : 0.8;
+        this.ents.glowL.push(P.x, 1.15, P.z, 3.0, 3.0, this.ents.fx.ring, false, 1.3 * k, 1.05 * k, 0.45 * k, 1);
+        this.ents.glowL.push(P.x, 1.15, P.z, 3.2, 3.2, this.ents.fx.glow, false, 0.35 * k, 0.28 * k, 0.1 * k, 1);
+        this.ents.flatL.push(P.x, 0.05, P.z, 2.6, 2.2, this.ents.fx.ring, false, 1.2 * k, 0.95 * k, 0.4 * k, 1);
+      }
       if (P.state === PS.ALIVE && P.hp < P.maxHp) {
         const f = Math.max(0, P.hp / P.maxHp);
         this.ents.uiL.push(P.x, -0.1, P.z + 0.55, 1.0, 0.13, this.ents.fx.px, false, 0.05, 0.03, 0.08, 0.85);
         this.ents.uiL.push(P.x - (0.92 * (1 - f)) / 2, -0.1, P.z + 0.55, 0.92 * f, 0.07, this.ents.fx.px, false, 0.95, 0.22, 0.25, 1);
       }
     }
+    this.ents.showNumbers = !this.options || this.options.s.numbers;
     this.ents.update(ctx);
     this.ents.end();
     // world: lighting, day -> night over the run, lanterns
@@ -517,11 +553,15 @@ export class RunView {
   }
 
   handleInput(dt) {
-    const running = this.app.phase === PHASE.RUN && this.phase !== PHASE.OVER;
+    const latest = this.net.latest();
+    this.pausedBy = latest && latest.json.pz ? latest.json.pz : null;
+    const menu = this.options && this.options.open;
+    const running = this.app.phase === PHASE.RUN && this.phase !== PHASE.OVER && !this.pausedBy && !menu;
     const levelOpen = this.hud.choice.size > 0;
     const ids = [...this.local.keys()];
     // level-up cards / results take the menu inputs
     for (const id of ids) {
+      if (menu) break;
       const L = this.local.get(id);
       const m = this.input.menu(L.slot);
       if (levelOpen) this.hud.levelInput(id, m, this.players, this.local);
@@ -603,11 +643,13 @@ export class RunView {
     }
     // notice for local travelers who are down
     let notice = '';
+    if (this.pausedBy && !(this.options && this.options.open)) notice = `<b>Paused by ${this.pausedBy.replace(/[<>&]/g, '')}</b> &middot; press Esc or View for options and Resume`;
     const locals = [...this.players.values()].filter((P) => P.local);
     const revive = settingValue(this.app.settings, 'revive') !== 0;
-    if (locals.length && locals.every((P) => P.state !== PS.ALIVE) && this.phase !== PHASE.OVER) {
-      notice = revive ? '<b>You have fallen!</b> Hold on &mdash; an ally can revive you by standing close.' : '<b>You have fallen.</b> Watching over the party&hellip;';
-    } else if (!locals.length && this.phase !== PHASE.OVER) notice = 'Spectating the expedition &middot; you can join the next one from camp';
+    if (notice) { /* paused */ } else if (locals.length && locals.every((P) => P.state !== PS.ALIVE) && this.phase !== PHASE.OVER) {
+      const secs = Math.max(...locals.map((P) => P.respawnIn || 0));
+      notice = revive ? `<b>You have fallen!</b> You return in <b>${secs}s</b> if your party holds out.` : '<b>You have fallen.</b> Watching over the party&hellip;';
+    } else if (!locals.length && this.phase !== PHASE.OVER && !notice) notice = 'Spectating the expedition &middot; you can join the next one from camp';
     // off-screen markers: other travelers, chests, the boss
     const markers = [];
     for (const P of this.players.values()) if (!P.local && P.init) markers.push({ x: P.x, z: P.z, color: P.color, icon: portraitURL(P.char) });

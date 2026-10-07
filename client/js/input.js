@@ -229,7 +229,7 @@ export class Input {
     m.confirm ||= bit(PAD.A);
     m.back ||= bit(PAD.B);
     if (withStart) m.start ||= bit(PAD.MENU);
-    m.alt ||= bit(PAD.Y) || bit(PAD.VIEW);
+    m.alt ||= bit(PAD.Y);
     m.guild ||= bit(PAD.X);
     m.prev ||= bit(PAD.LB);
     m.next ||= bit(PAD.RB);

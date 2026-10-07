@@ -1,4 +1,5 @@
 // Constants shared by the server simulation and the browser client.
+import { BALANCE } from './balance.js';
 
 export const TICK_RATE = 30; // server simulation steps per second
 export const DT = 1 / TICK_RATE;
@@ -48,11 +49,12 @@ export function fmtTime(sec) {
   return String(Math.floor(sec / 60)).padStart(2, '0') + ':' + String(sec % 60).padStart(2, '0');
 }
 
-// Experience needed to go from `level` to level+1 (Vampire-Survivors-like curve), scaled for party size
+// Experience needed to go from `level` to level+1, scaled for party size (see shared/balance.js)
 export function xpForLevel(level, players = 1) {
+  const X = BALANCE.xp;
   let base;
-  if (level < 20) base = 5 + (level - 1) * 10;
-  else if (level < 40) base = 195 + (level - 20) * 13;
-  else base = 455 + (level - 40) * 16;
-  return Math.round(base * (1 + 0.35 * (Math.max(1, players) - 1)));
+  if (level < 20) base = X.early + (level - 1) * X.earlyStep;
+  else if (level < 40) base = X.mid + (level - 20) * X.midStep;
+  else base = X.late + (level - 40) * X.lateStep;
+  return Math.round(base * (1 + X.coop * (Math.max(1, players) - 1)));
 }

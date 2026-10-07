@@ -129,8 +129,10 @@ export class Lobby {
     if (!ctx.isHost) return;
     const d = SETTINGS.find((x) => x.key === key);
     const cur = ctx.settings[key] ?? d.def;
-    const n = d.options.length;
-    this.send({ t: 'set', key, val: (cur + dir + n) % n });
+    // stages unlock as you beat them: the leader can only pick stages they have reached
+    const n = key === 'stage' ? Math.min(d.options.length, this.guild.stage + 1) : d.options.length;
+    if (n <= 1) { this.sfx('deny'); return; }
+    this.send({ t: 'set', key, val: (Math.min(cur, n - 1) + dir + n) % n });
     this.sfx('move');
   }
 
@@ -185,7 +187,7 @@ export class Lobby {
     const states = [...ctx.local.keys()].map((id) => [id, this.state(id)]);
     const prim = ctx.primaryId ? this.state(ctx.primaryId) : null;
     const focus = this.hover >= 0 ? this.hover : prim && prim.cursor >= 0 ? prim.cursor : (ctx.roster.get(ctx.primaryId)?.char ?? 0);
-    const key = JSON.stringify([humans, ctx.settings, ctx.isHost, states, focus, ctx.phase, Math.ceil(3.2 - (ctx.phaseT || 0)), this.guild.gold, this.guild.ranks, ctx.hostName]);
+    const key = JSON.stringify([humans, ctx.settings, ctx.isHost, states, focus, ctx.phase, Math.ceil(3.2 - (ctx.phaseT || 0)), this.guild.gold, this.guild.ranks, this.guild.stage, ctx.hostName]);
     if (key === this.key) return;
     this.key = key;
 
@@ -258,6 +260,7 @@ export class Lobby {
     const editRow = states.find(([, st]) => st.mode === 'settings');
     SETTINGS.forEach((d, i) => {
       const row = el('div', 'set' + (editRow && editRow[1].setRow === i ? ' focus' : ''));
+      if (d.key === 'stage') row.title = 'Stages unlock as you beat them';
       row.appendChild(el('span', 'sl', d.label));
       const v = el('span', 'sv');
       if (ctx.isHost) {
@@ -270,6 +273,11 @@ export class Lobby {
       row.appendChild(v);
       set.appendChild(row);
     });
+
+    if (ctx.isHost && this.guild.stage + 1 < SETTINGS[0].options.length) {
+      const nxt = SETTINGS[0].labels[this.guild.stage + 1];
+      set.appendChild(el('div', 'hostline', `Survive ${SETTINGS[0].labels[this.guild.stage]} to unlock ${nxt}.`));
+    }
 
     // party slots
     const party = el('div', 'lb-party');
@@ -309,7 +317,7 @@ export class Lobby {
     else status = `${readyN} / ${humans.length} ready`;
     actions.append(gbtn, ready, el('div', 'status', status));
     const hints = el('div', 'lb-hints');
-    for (const [k, v] of [['WASD / Stick', 'Walk around camp'], ['Q E / LB RB', 'Choose traveler'], ['Space / A', 'Ready'], ['Tab / Y', 'Settings (leader)'], ['G / X', 'Guild'], ['Wheel / R-Stick', 'Zoom'], ['F', 'Fullscreen'], ['Start', 'Join on another controller']]) {
+    for (const [k, v] of [['WASD / Stick', 'Walk around camp'], ['Q E / LB RB', 'Choose traveler'], ['Space / A', 'Ready'], ['Tab / Y', 'Settings (leader)'], ['G / X', 'Guild'], ['Esc / View', 'Options'], ['Wheel / R-Stick', 'Zoom'], ['F', 'Fullscreen'], ['Start', 'Join on another controller']]) {
       const h = el('span');
       h.append(el('b', '', k), document.createTextNode(' ' + v));
       hints.appendChild(h);

@@ -172,10 +172,10 @@ export class Hud {
       if (!r) continue;
       const f = p.maxHp ? Math.max(0, p.hp / p.maxHp) : 0;
       r.lagV = r.lagV > f ? Math.max(f, r.lagV - dt * 0.6) : f;
-      const hk = f.toFixed(3) + p.state;
+      const hk = f.toFixed(3) + p.state + ':' + (p.respawnIn || 0);
       if (r.hk !== hk) {
         r.hp.style.width = (f * 100).toFixed(1) + '%';
-        r.hpt.textContent = p.state === PS.DOWNED ? 'DOWN' : `${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}`;
+        r.hpt.textContent = p.state === PS.DOWNED ? (p.respawnIn ? `BACK IN ${p.respawnIn}s` : 'DOWN') : `${Math.max(0, Math.ceil(p.hp))}/${p.maxHp}`;
         r.row.classList.toggle('down', p.state === PS.DOWNED);
         r.row.classList.toggle('low', f < 0.3 && p.state !== PS.DOWNED);
         r.hk = hk;

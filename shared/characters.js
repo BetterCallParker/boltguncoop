@@ -61,4 +61,57 @@ export const CHARACTERS = [
   },
 ];
 
+// Placeholder look for travelers whose pixel art isn't painted yet (gray, unadorned). Give a class
+// `sheet: 'art/<id>.png'` (21 frames of 32x40, same layout as the painted travelers) to use your art.
+const GRAY = (weapon = null, build = 'slim') => ({ outfit: 'leather', skin: '#b4b4b4', hair: '#7a7a7a', hairStyle: 'short', main: '#8f8f8f', dark: '#626262', accent: '#c4c4c4', head: null, cape: null, build, weapon, placeholder: true });
+
+// unlock: an achievement id (see shared/unlocks.js); price: Guild gold to unlock it outright
+const C = (id, name, title, weapon, desc, perk, bonus, growth, look, price) => ({ id, name, title, weapon, desc, perk, bonus, growth, look, price });
+CHARACTERS.push(
+  C('brakka', 'Brakka', 'The Whirling Berserker', 'whirl', 'A storm of axes and fury from the northern clans. The horde comes to him; it does not leave.',
+    '+30 Max HP, +10% Might. +5% Might every 10 levels.', { maxHp: 30, might: 0.1 }, { stat: 'might', amount: 0.05 }, GRAY('sword', 'broad'), 1200),
+  C('morwen', 'Morwen', 'The Bone Weaver', 'bonesplinter', 'She reads the future in bones, and throws the ones that disagree.',
+    '+10% Projectile Speed, +10% Duration. +5% Area every 10 levels.', { speed: 0.1, duration: 0.1 }, { stat: 'area', amount: 0.05 }, GRAY('staff'), 1500),
+  C('sable', 'Sable', 'The Gravecaller', 'raisedead', 'The dead answer her call, and they are surprisingly polite about it.',
+    '+20% Duration, +10% Growth. +1 Amount at level 30.', { duration: 0.2, growth: 0.1 }, { stat: 'duration', amount: 0.05 }, GRAY('tome'), 2000),
+  C('ysolde', 'Ysolde', 'The Frost Witch', 'frostorb', 'Winter follows her like a loyal hound.',
+    '+15% Area, +10 Max HP. +5% Area every 10 levels.', { area: 0.15, maxHp: 10 }, { stat: 'area', amount: 0.05 }, GRAY('staff'), 1500),
+  C('daro', 'Daro', 'The Tempest Monk', 'tempestpalm', 'Twenty years of meditation, focused into one very loud palm strike.',
+    '+15% Move Speed, -5% Cooldown. -2% Cooldown every 10 levels.', { moveSpeed: 0.15, cooldown: -0.05 }, { stat: 'cooldown', amount: -0.02 }, GRAY(null), 1800),
+  C('hale', 'Hale', 'The Templar', 'hammers', 'Sworn to the Dawn Order, he carries more hammers than strictly necessary.',
+    '+2 Armor, +20 Max HP. +1 Armor every 10 levels.', { armor: 2, maxHp: 20 }, { stat: 'armor', amount: 1 }, GRAY('sword', 'broad'), 1800),
+  C('rook', 'Rook', 'The Warden Ranger', 'arrowrain', 'Guards the old forest roads. Has never once lost an arrow he wanted back.',
+    '+10% Area, +15% Luck. +5% Luck every 10 levels.', { area: 0.1, luck: 0.15 }, { stat: 'luck', amount: 0.05 }, GRAY('crossbow'), 1500),
+  C('nyx', 'Nyx', 'The Night Assassin', 'shuriken', 'There is no record of her. That is how she likes it.',
+    '+15% Move Speed, +10% Might. +3% Move Speed every 10 levels.', { moveSpeed: 0.15, might: 0.1 }, { stat: 'moveSpeed', amount: 0.03 }, GRAY('daggers'), 2000),
+  C('fennick', 'Fennick', 'The Clockwork Engineer', 'sentry', 'If it ticks, he built it. If it explodes, he meant to.',
+    '+20% Duration, +1 Armor. +5% Duration every 10 levels.', { duration: 0.2, armor: 1 }, { stat: 'duration', amount: 0.05 }, GRAY('flask', 'round'), 1800),
+  C('orla', 'Orla', 'The Moon Druid', 'wolves', 'Raised by wolves. Literally. They still visit.',
+    '+0.3 HP Recovery, +10% Move Speed. +0.1 Recovery every 10 levels.', { recovery: 0.3, moveSpeed: 0.1 }, { stat: 'recovery', amount: 0.1 }, GRAY('staff'), 1500),
+  C('torvald', 'Torvald', 'The Earthshaker', 'rupture', 'When he stamps his foot, mountains apologize.',
+    '+40 Max HP, +10% Area. +10 Max HP every 10 levels.', { maxHp: 40, area: 0.1 }, { stat: 'maxHp', amount: 10 }, GRAY('sword', 'broad'), 2200),
+  C('seraphine', 'Seraphine', 'The Lightbringer', 'holycross', 'A paladin of the Sunspire who walks into the dark on purpose.',
+    '+20 Max HP, +10% Might. +5% Might every 10 levels.', { maxHp: 20, might: 0.1 }, { stat: 'might', amount: 0.05 }, GRAY('censer'), 2400),
+  C('ashka', 'Ashka', 'The Pyromancer', 'dragonbreath', 'Learned fire from a dragon. Learned manners from nobody.',
+    '+15% Might, -10 Max HP. +5% Might every 10 levels.', { might: 0.15, maxHp: -10 }, { stat: 'might', amount: 0.05 }, GRAY('staff'), 2400),
+  C('kestrel', 'Kestrel', 'The Falconer', 'talons', 'Her birds see everything. She mostly listens to the gossip.',
+    '+20% Projectile Speed, +25% Magnet. +5% Projectile Speed every 10 levels.', { speed: 0.2, magnet: 0.25 }, { stat: 'speed', amount: 0.05 }, GRAY('crossbow'), 2000),
+  C('vael', 'Vael', 'The Void Seer', 'gravitywell', 'Stared into the abyss. The abyss looked away first.',
+    '+20% Area, +10% Duration. +5% Area every 10 levels.', { area: 0.2, duration: 0.1 }, { stat: 'area', amount: 0.05 }, GRAY('tome'), 2800),
+  C('anselm', 'Anselm', 'The Exorcist', 'sunlance', 'Has banished four hundred demons and one very persistent salesman.',
+    '+10% Might, +0.2 HP Recovery. +5% Might every 10 levels.', { might: 0.1, recovery: 0.2 }, { stat: 'might', amount: 0.05 }, GRAY('censer'), 2600),
+  C('moss', 'Moss', 'The Plague Doctor', 'miasma', 'The mask is for your protection, not his.',
+    '+25% Duration, +10% Move Speed. +5% Duration every 10 levels.', { duration: 0.25, moveSpeed: 0.1 }, { stat: 'duration', amount: 0.05 }, GRAY('flask'), 2600),
+  C('ingrid', 'Ingrid', 'The Valkyrie', 'javelin', 'Chooses who falls in battle. Mostly the other side.',
+    '+20 Max HP, +1 Armor, +10% Might. +5% Might every 10 levels.', { maxHp: 20, armor: 1, might: 0.1 }, { stat: 'might', amount: 0.05 }, GRAY('sword'), 3000),
+  C('ravel', 'Ravel', 'The Blood Mage', 'bloodnova', 'Pays for his magic in blood. Usually someone else\'s.',
+    '+30 Max HP, +0.5 HP Recovery, -5% Might. +10 Max HP every 10 levels.', { maxHp: 30, recovery: 0.5, might: -0.05 }, { stat: 'maxHp', amount: 10 }, GRAY('tome'), 3000),
+  C('caius', 'Caius', 'The Gunslinger', 'scattergun', 'Carries a musket built from a cannon. Somehow it is still legal.',
+    '+10% Might, +10% Luck. +5% Might every 10 levels.', { might: 0.1, luck: 0.1 }, { stat: 'might', amount: 0.05 }, GRAY('crossbow'), 3200),
+  C('quill', 'Quill', 'The Battle Bard', 'anthem', 'Every great battle needs a soundtrack. He brought his own.',
+    '+20% Growth, +20% Greed. +5% Growth every 10 levels.', { growth: 0.2, greed: 0.2 }, { stat: 'growth', amount: 0.05 }, GRAY('fans'), 3200),
+  C('zephyra', 'Zephyra', 'The Windwalker', 'cyclone', 'Never stands still. Has not sat down since she was six.',
+    '+20% Move Speed, +10% Projectile Speed. +3% Move Speed every 10 levels.', { moveSpeed: 0.2, speed: 0.1 }, { stat: 'moveSpeed', amount: 0.03 }, GRAY('fans'), 3500),
+);
+
 export const CHAR_INDEX = Object.fromEntries(CHARACTERS.map((c, i) => [c.id, i]));

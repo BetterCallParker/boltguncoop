@@ -55,7 +55,7 @@ export class LocalNet {
     if (!g || !msg) return;
     switch (msg.t) {
       case 'join': {
-        const res = g.addPlayer(CID, msg.name, msg.c, msg.meta);
+        const res = g.addPlayer(CID, msg.name, msg.c, msg.meta, msg.unlocks);
         if (!res.ok) this.post({ t: 'nojoin', slot: msg.slot, why: res.why });
         else {
           this.mine.add(res.id);
@@ -66,13 +66,15 @@ export class LocalNet {
       case 'leave': if (this.mine.delete(msg.id)) g.removePlayer(msg.id); break;
       case 'char': if (this.mine.has(msg.id)) g.setCharacter(msg.id, msg.c); break;
       case 'ready': if (this.mine.has(msg.id)) g.toggleReady(msg.id, msg.v); break;
-      case 'meta': if (this.mine.has(msg.id)) g.setMeta(msg.id, msg.ranks); break;
+      case 'meta': if (this.mine.has(msg.id)) g.setMeta(msg.id, msg.ranks, msg.unlocks); break;
       case 'set': g.setSetting(CID, String(msg.key), msg.val); break;
       case 'pos':
         if (Array.isArray(msg.d)) for (const row of msg.d) if (this.mine.has(row[0])) g.playerPos(row[0], row[1], row[2], row[3], row[4]);
         break;
       case 'pick': if (this.mine.has(msg.id)) g.pick(msg.id, msg.i); break;
       case 'lobby': g.backToLobby(CID); break;
+      case 'pause': g.setPause(CID, !!msg.v); break;
+      case 'abandon': g.abandon(CID); break;
     }
   }
 

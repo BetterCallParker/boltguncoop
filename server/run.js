@@ -7,7 +7,7 @@ import {
 } from '../shared/constants.js';
 import { CHARACTERS } from '../shared/characters.js';
 import {
-  WEAPONS, PASSIVES, BASE_WEAPONS, PASSIVE_IDS, computeStats, weaponStats, maxLevel, orbitState,
+  WEAPONS, PASSIVES, BASE_WEAPONS, SHARED_WEAPONS, PASSIVE_IDS, computeStats, weaponStats, maxLevel, orbitState,
   ORBIT_RADIUS, AURA_RADIUS, NOVA_RADIUS, CLEAVE_RADIUS,
 } from '../shared/items.js';
 import { ENEMIES, ENEMY_INDEX } from '../shared/enemies.js';
@@ -15,9 +15,18 @@ import { STAGES, TIMELINE, EVENTS } from '../shared/stages.js';
 import { settingValue, DIFFICULTY } from '../shared/settings.js';
 import { mulberry32, pickWeighted } from '../shared/rng.js';
 import { encodeSnapshot, EF } from '../shared/protocol.js';
+import { BALANCE } from '../shared/balance.js';
+import { sanitizeUnlocks } from '../shared/unlocks.js';
 
 const MAX_ENEMY_R = 2.2;
 const GEM_CAP = 450;
+// evolved monster tiers (index 1..3): health, damage, experience, speed, size
+const TB = BALANCE.monsters.tiers;
+const TIER_HP = [0, ...TB.hp];
+const TIER_DMG = [0, ...TB.dmg];
+const TIER_XP = [0, ...TB.xp];
+const TIER_SPEED = [0, ...TB.speed];
+const TIER_R = [0, ...TB.size];
 const r2 = (v) => Math.round(v * 100) / 100;
 
 class Grid {
@@ -99,6 +108,12 @@ export class Run {
     this.killList = [];
     this.gs = []; this.gm = []; this.gc = []; this.ps = []; this.pc = [];
     this.finalSpawned = false;
+    this.paused = null;
+    this.impacts = []; // scheduled area hits (arrow rain, fissures)
+    this.beams = []; // active beams and flame cones
+    this.mines = [];
+    this.minions = [];
+    this.burstDepth = 0;
 
     const n = lobbyPlayers.length;
     lobbyPlayers.forEach((lp, i) => {
@@ -106,9 +121,10 @@ export class Run {
       const p = {
         id: lp.id, name: lp.name, char: lp.char, seat: lp.seat, clientId: lp.clientId, meta: lp.meta || {},
         x: n > 1 ? Math.cos(a) * 1.5 : 0, z: n > 1 ? Math.sin(a) * 1.5 : 0, fx: 1, dirx: 1, dirz: 0,
-        state: PS.ALIVE, hp: 100, maxHp: 100, iframes: 1.5, reviveProg: 0,
+        state: PS.ALIVE, hp: 100, maxHp: 100, iframes: 1.5, reviveProg: 0, respawnT: 0, shieldT: 0,
         weapons: [], passives: {}, stats: null, ws: new Map(), pending: [],
         kills: 0, dmg: {}, gold: 0, lastPos: game.time, revival: 0,
+        unlocks: sanitizeUnlocks(lp.unlocks), shieldHP: 0, shieldMax: 0, lastHurt: -99, buffUntil: 0, buffK: 0, leechBudget: 0, thornT: 0, trail: null,
       };
       this.players.set(p.id, p);
       this.addWeapon(p, CHARACTERS[p.char].weapon);
@@ -140,6 +156,15 @@ export class Run {
     p.hp = Math.min(p.hp, p.maxHp);
     p.ws.clear();
     for (const w of p.weapons) p.ws.set(w.id, weaponStats(w.id, w.lvl, p.stats));
+    // passive abilities hook into damage, kills and hits
+    p.hooks = {};
+    for (const w of p.weapons) {
+      const ws = p.ws.get(w.id);
+      if (ws && (ws.kind === 'shield' || ws.kind === 'thorns' || ws.kind === 'corpse' || ws.kind === 'leech')) p.hooks[ws.kind] = { w, ws };
+    }
+    const sh = p.hooks.shield;
+    p.shieldMax = sh ? Math.round(sh.ws.amount) : 0;
+    if (!sh) p.shieldHP = 0;
   }
 
   addWeapon(p, id) {
@@ -178,7 +203,7 @@ export class Run {
     const now = this.game.time;
     const el = clamp(now - p.lastPos, 0, 0.5);
     p.lastPos = now;
-    if (p.state !== PS.ALIVE || this.phase !== PHASE.RUN) return;
+    if (p.state !== PS.ALIVE || this.phase !== PHASE.RUN || this.paused) return;
     const max = BASE_MOVE_SPEED * p.stats.moveSpeed * el * 1.5 + 0.35;
     let mx = x - p.x, mz = z - p.z;
     const d = Math.hypot(mx, mz);
@@ -234,6 +259,10 @@ export class Run {
     this.updateProjectiles();
     this.updateZones();
     this.updateMeteors();
+    this.updateImpacts();
+    this.updateBeams();
+    this.updateMines();
+    this.updateMinions();
     this.updateEnemies();
     this.updateEnemyShots();
     this.updateGems();
@@ -254,8 +283,25 @@ export class Run {
     return [p.x + Math.cos(a) * (VIEW_HX + 1.5) * k, p.z + Math.sin(a) * (VIEW_HZ + 1.5) * k];
   }
 
+  // the horde starts soft and peaks around the final boss (shared/balance.js)
   hpMul() {
-    return (1 + 2.4 * Math.min(1.2, this.frac())) * (1 + 0.65 * (this.coop() - 1)) * this.diff.hp;
+    const M = BALANCE.monsters;
+    const f = Math.min(1.2, this.frac());
+    return (1 + M.hpGrowth * Math.pow(f, M.hpCurve)) * (1 + M.coopHp * (this.coop() - 1)) * this.diff.hp;
+  }
+
+  dmgMul() {
+    const M = BALANCE.monsters;
+    return 1 + M.dmgGrowth * Math.pow(Math.min(1.2, this.frac()), M.dmgCurve);
+  }
+
+  // evolved monsters: tier 2 from tier2Start, tier 3 from tier3Start
+  rollTier() {
+    const M = BALANCE.monsters;
+    const f = this.frac();
+    if (f < M.tier2Start) return 1;
+    if (f < M.tier3Start) return this.rand() < ((f - M.tier2Start) / (M.tier3Start - M.tier2Start)) * M.tier2Share ? 2 : 1;
+    return this.rand() < (f - M.tier3Start) / Math.max(0.01, 1 - M.tier3Start) ? 3 : 2;
   }
 
   spawnEnemy(typeId, x, z, opts = {}) {
@@ -265,12 +311,13 @@ export class Run {
     for (let k = 0; k < 70000 && this.enemyById.has(id); k++) id = (id % 65535) + 1;
     this.nextEnemyId = (id % 65535) + 1;
     let hp = def.hp;
-    if (def.boss) hp = def.hp * (1 + 0.65 * (this.coop() - 1)) * this.diff.hp * (1 + 0.5 * this.frac());
+    const tier = def.boss || def.elite || def.prop || opts.ring ? 1 : this.rollTier();
+    if (def.boss) hp = def.hp * (1 + BALANCE.monsters.bossCoopHp * (this.coop() - 1)) * this.diff.hp * (1 + 0.5 * this.frac());
     else if (def.elite) hp = def.hp * this.hpMul() * 0.8;
-    else if (!def.prop) hp = def.hp * this.hpMul();
+    else if (!def.prop) hp = def.hp * this.hpMul() * TIER_HP[tier];
     const e = {
-      id, typeId, type: ENEMY_INDEX[typeId], def, x, z, kx: 0, kz: 0, hp, maxHp: hp,
-      speed: def.speed * this.diff.speed * (0.92 + this.rand() * 0.16), r: def.r, mass: def.mass,
+      id, typeId, type: ENEMY_INDEX[typeId], def, x, z, kx: 0, kz: 0, hp, maxHp: hp, tier,
+      speed: def.speed * this.diff.speed * (0.92 + this.rand() * 0.16) * TIER_SPEED[tier], r: def.r * TIER_R[tier], mass: def.mass * TIER_R[tier],
       flash: 0, frozen: 0, slow: 0, slowK: 1, atkCd: 0, target: null, retarget: 0, age: 0, left: false,
       phase: this.rand() * 10, abilityCd: 4, rangedCd: def.ranged ? def.ranged.cd * this.rand() : 0, dead: false,
       ...opts,
@@ -281,7 +328,8 @@ export class Run {
   }
 
   maxEnemies() {
-    return Math.min(720, Math.round((260 + 70 * this.coop()) * this.density));
+    const S = BALANCE.spawn;
+    return Math.min(S.maxCap, Math.round((S.maxBase + S.maxPerPlayer * (this.coop() - 1)) * this.density));
   }
 
   spawning() {
@@ -289,10 +337,11 @@ export class Run {
     const seg = TIMELINE[Math.min(TIMELINE.length - 1, Math.floor(Math.min(0.999, f) * TIMELINE.length))];
     const roles = this.stage.roles;
     const cap = this.maxEnemies();
-    const coopK = 1 + 0.35 * (this.coop() - 1);
+    const S = BALANCE.spawn;
+    const coopK = 1 + S.coopRate * (this.coop() - 1);
     const lateK = f >= 1 ? 0.5 : 1;
-    const minAlive = Math.round(seg.min * (1 + 0.4 * (this.coop() - 1)) * this.density * lateK);
-    this.spawnAcc += seg.rate * coopK * this.density * lateK * DT;
+    const minAlive = Math.round(seg.min * S.minScale * (1 + S.coopMin * (this.coop() - 1)) * this.density * lateK);
+    this.spawnAcc += seg.rate * S.rateScale * coopK * this.density * lateK * DT;
     let burst = this.enemies.length < minAlive ? Math.min(8, minAlive - this.enemies.length) : 0;
     while ((this.spawnAcc >= 1 || burst > 0) && this.enemies.length < cap) {
       if (burst > 0) burst--;
@@ -309,7 +358,7 @@ export class Run {
     // braziers to smash for goodies
     this.brazierT -= DT;
     if (this.brazierT <= 0) {
-      this.brazierT = 22 / this.pickupMul;
+      this.brazierT = BALANCE.pickups.brazierEvery / this.pickupMul;
       let props = 0;
       for (const e of this.enemies) if (e.def.prop) props++;
       if (props < 3 * this.coop()) {
@@ -371,23 +420,20 @@ export class Run {
     for (const p of this.players.values()) {
       if (p.iframes > 0) p.iframes -= DT;
       if (p.state === PS.DOWNED) {
+        // a fallen traveler returns after a countdown, as long as someone is still standing
         if (!this.reviveOn) continue;
-        let helpers = 0, by = null;
-        for (const q of this.players.values()) {
-          if (q !== p && q.state === PS.ALIVE && Math.hypot(q.x - p.x, q.z - p.z) < REVIVE_RADIUS) { helpers++; by = q; }
-        }
-        if (helpers) p.reviveProg += (DT / REVIVE_TIME) * (1 + 0.5 * (helpers - 1));
-        else p.reviveProg = Math.max(0, p.reviveProg - DT * 0.25);
-        if (p.reviveProg >= 1) {
-          p.state = PS.ALIVE;
-          p.hp = Math.round(p.maxHp * 0.4);
-          p.iframes = 2;
-          p.reviveProg = 0;
-          this.ev('up', p.id, by ? by.id : -1);
-        }
+        const total = BALANCE.players.respawnSeconds;
+        if (this.alive().length) p.respawnT -= DT;
+        p.reviveProg = Math.min(1, Math.max(0, 1 - p.respawnT / total));
+        if (p.respawnT <= 0) this.respawn(p);
         continue;
       }
+      if (p.shieldT > 0) p.shieldT -= DT;
       if (p.state !== PS.ALIVE) continue;
+      const hk = p.hooks || {};
+      if (hk.shield && p.shieldHP < p.shieldMax && this.t - p.lastHurt > hk.shield.ws.cd) p.shieldHP = p.shieldMax;
+      if (hk.thorns && hk.thorns.ws.pulse && this.t >= p.thornT) this.thorns(p, hk.thorns);
+      if (hk.leech) p.leechBudget = Math.min(hk.leech.ws.cap || 3, p.leechBudget + (hk.leech.ws.cap || 3) * DT);
       if (p.stats.recovery > 0 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + p.stats.recovery * DT);
       for (let i = p.pending.length - 1; i >= 0; i--) {
         if (this.t >= p.pending[i].at) {
@@ -403,6 +449,13 @@ export class Run {
   tickWeapon(p, w) {
     const ws = p.ws.get(w.id);
     if (!ws) return;
+    switch (ws.kind) {
+      case 'shield': case 'thorns': case 'corpse': case 'leech':
+        return; // passive: handled by the damage hooks
+      case 'spin': return this.tickSpin(p, w, ws);
+      case 'summon': return this.tickSummon(p, w, ws);
+      case 'trail': return this.tickTrail(p, w, ws);
+    }
     if (ws.kind === 'aura') {
       w.timer -= DT;
       if (w.timer <= 0) {
@@ -440,6 +493,7 @@ export class Run {
     w.timer -= DT;
     if (w.timer > 0) return;
     w.timer = ws.cd;
+    if (this.castNew(p, w, ws)) return;
     switch (ws.kind) {
       case 'cleave':
         for (let i = 0; i < ws.amount; i++) p.pending.push({ at: this.t + i * 0.16, w, side: i % 2 ? -p.fx : p.fx });
@@ -455,11 +509,12 @@ export class Run {
             this.projectile(p, w.id, 'storm', p.x, p.z, Math.cos(a) * speed, Math.sin(a) * speed, 1.4, 0.35, ws);
           }
         } else {
+          const vis = ws.vis && ws.vis !== 'bolt' ? ws.vis : 'bolt';
           for (let i = 0; i < ws.amount; i++) {
             const t = targets[i % Math.max(1, targets.length)];
             let a = t ? Math.atan2(t.z - p.z, t.x - p.x) : Math.atan2(p.dirz, p.dirx) + (i - (ws.amount - 1) / 2) * 0.2;
             if (t && i >= targets.length) a += (this.rand() - 0.5) * 0.3;
-            this.projectile(p, w.id, 'bolt', p.x, p.z, Math.cos(a) * speed, Math.sin(a) * speed, 1.3, 0.3, ws);
+            this.projectile(p, w.id, vis, p.x, p.z, Math.cos(a) * speed, Math.sin(a) * speed, 1.3, 0.3 * (ws.size || 1), ws, { slowHit: ws.slow, freezeHit: ws.freeze, explode: ws.explode ? ws.explode * ws.area : 0 });
           }
         }
         break;
@@ -497,6 +552,7 @@ export class Run {
         }
         break;
       }
+      case 'zone':
       case 'flask': {
         const pool = this.enemiesNear(p.x, p.z, 9, 30);
         for (let i = 0; i < ws.amount; i++) {
@@ -510,8 +566,9 @@ export class Run {
           }
           const flight = 0.55;
           const id = this.id();
-          this.zones.push({ pending: true, id, at: this.t + flight, x: tx, z: tz, r: 1.6 * ws.area, life: 2.4 * ws.duration, tick: ws.tick, next: 0, dmg: ws.dmg, owner: p, w: w.id, slow: ws.slow, kind: ws.evolved ? 'plague' : 'acid' });
-          this.ev('pj', id, 'flask', r2(p.x), r2(p.z), r2(tx), r2(tz), flight, p.id);
+          const zkind = ws.kind === 'zone' ? ws.vis : ws.evolved ? 'plague' : 'acid';
+          this.zones.push({ pending: true, id, at: this.t + flight, x: tx, z: tz, r: 1.6 * ws.area, life: 2.4 * ws.duration, tick: ws.tick, next: 0, dmg: ws.dmg, owner: p, w: w.id, slow: ws.slow, hex: ws.hex || 0, kind: zkind });
+          this.ev('pj', id, ws.kind === 'zone' ? 'hexorb' : 'flask', r2(p.x), r2(p.z), r2(tx), r2(tz), flight, p.id);
         }
         break;
       }
@@ -528,8 +585,9 @@ export class Run {
           const z = t ? t.z : p.z + (this.rand() - 0.5) * 12;
           if (t) used.add(t);
           const R = 1.1 * ws.area;
-          this.ev('zap', r2(x), r2(z), r2(R), ws.evolved ? 1 : 0);
+          this.ev('zap', r2(x), r2(z), r2(R), ws.evolved ? 1 : 0, ws.vis === 'holy' ? 'holy' : 'storm');
           this.aoe(x, z, R, ws.dmg, p, w.id, ws.kb);
+          if (ws.healAllies) for (const q of this.alive()) if ((q.x - x) ** 2 + (q.z - z) ** 2 < (R + 1.5) ** 2) this.heal(q, ws.healAllies);
           if (ws.chain && t) {
             let from = t;
             for (let c = 0; c < ws.chain; c++) {
@@ -546,11 +604,23 @@ export class Run {
       }
       case 'nova': {
         const R = NOVA_RADIUS * ws.area;
-        this.ev('nv', p.id, r2(R), ws.freeze ? 1 : 0);
+        const vis = ws.vis && ws.vis !== 'nova' ? ws.vis : 'frost';
+        this.ev('nv', p.id, r2(R), ws.freeze ? 1 : 0, vis);
+        let n = 0;
         for (const e of this.enemiesNear(p.x, p.z, R)) {
           this.hit(e, ws.dmg, p, w.id, e.x - p.x, e.z - p.z, ws.kb);
-          if (ws.freeze && !e.def.boss) e.frozen = Math.max(e.frozen, ws.freeze);
-          else { e.slow = 1.5 * ws.duration; e.slowK = 1 - ws.slow; }
+          n++;
+          if ((ws.freeze || ws.stun) && !e.def.boss) e.frozen = Math.max(e.frozen, ws.freeze || ws.stun);
+          else if (ws.slow) { e.slow = 1.5 * ws.duration; e.slowK = 1 - ws.slow; }
+        }
+        if (ws.heal && n) this.heal(p, Math.min(30, n * ws.heal));
+        if (ws.buff || ws.healAllies) {
+          for (const q of this.alive()) {
+            if ((q.x - p.x) ** 2 + (q.z - p.z) ** 2 > (R + 2) ** 2) continue;
+            if (ws.buff) { q.buffK = Math.max(q.buffUntil > this.t ? q.buffK : 0, ws.buff); q.buffUntil = this.t + 4 * ws.duration; }
+            if (ws.healAllies) this.heal(q, ws.healAllies);
+          }
+          if (ws.buff) this.ev('buff', p.id, r2(R + 2), r2(4 * ws.duration));
         }
         break;
       }
@@ -568,10 +638,358 @@ export class Run {
         for (let i = 0; i < ws.amount; i++) {
           const a = this.rand() * Math.PI * 2;
           const sp = 10 * ws.speed;
-          this.projectile(p, w.id, 'wisp', p.x, p.z, Math.cos(a) * sp, Math.sin(a) * sp, 2.6, 0.32, ws, { homing: targets[i % Math.max(1, targets.length)] || null, tracked: true });
+          this.projectile(p, w.id, ws.vis && ws.vis !== 'wisp' ? ws.vis : 'wisp', p.x, p.z, Math.cos(a) * sp, Math.sin(a) * sp, 2.6, 0.32, ws, { homing: targets[i % Math.max(1, targets.length)] || null, tracked: true });
         }
         break;
       }
+    }
+  }
+
+  // ---------------------------------------------------------------- the wider arsenal
+  aimAt(p, range = 14) {
+    const t = this.enemiesNear(p.x, p.z, range, 1)[0];
+    return t ? Math.atan2(t.z - p.z, t.x - p.x) : Math.atan2(p.dirz, p.dirx);
+  }
+
+  // abilities that fire on a cooldown; returns true when it handled the kind
+  castNew(p, w, ws) {
+    switch (ws.kind) {
+      case 'scatter': {
+        const base = this.aimAt(p, 13);
+        const n = ws.amount, spread = ws.spread || 0.7;
+        const sp = 14 * ws.speed;
+        for (let i = 0; i < n; i++) {
+          const a = spread >= 6 ? base + (i / n) * Math.PI * 2 : base + (n > 1 ? (i / (n - 1) - 0.5) * spread : 0) + (this.rand() - 0.5) * 0.1;
+          const s2 = sp * (0.85 + this.rand() * 0.3);
+          this.projectile(p, w.id, ws.vis, p.x, p.z, Math.cos(a) * s2, Math.sin(a) * s2, ws.life || 0.6, 0.26, ws, { explode: ws.explode ? ws.explode * ws.area : 0 });
+        }
+        return true;
+      }
+      case 'orb': {
+        const base = this.aimAt(p, 12);
+        for (let i = 0; i < ws.amount; i++) {
+          const a = base + (i - (ws.amount - 1) / 2) * 0.5;
+          const sp = 3.4 * ws.speed;
+          this.projectile(p, w.id, 'frostorb', p.x, p.z, Math.cos(a) * sp, Math.sin(a) * sp, 2.4 * ws.duration, 0.45 * Math.sqrt(ws.area), ws,
+            { tracked: true, pierce: 9999, rehit: 0.5, emit: ws.emit || 0.18, emitT: 0, emitA: this.rand() * 6, shard: { dmg: ws.dmg * 0.7, freeze: ws.freeze, slow: ws.slow } });
+        }
+        return true;
+      }
+      case 'ball': {
+        const base = this.aimAt(p, 12);
+        for (let i = 0; i < ws.amount; i++) {
+          const a = base + (i - (ws.amount - 1) / 2) * 0.6 + (this.rand() - 0.5) * 0.3;
+          const sp = 2.6 * ws.speed;
+          this.projectile(p, w.id, 'ball', p.x, p.z, Math.cos(a) * sp, Math.sin(a) * sp, 3 * ws.duration, 0.5, ws,
+            { tracked: true, pierce: 9999, rehit: 9999, zapR: 1.8 * ws.area, zapEvery: 0.32 * (1 - (ws.zap || 0)), zapT: 0, dmgHit: 0 });
+        }
+        return true;
+      }
+      case 'spark': {
+        for (let i = 0; i < ws.amount; i++) {
+          const a = this.rand() * Math.PI * 2;
+          const sp = 7 * ws.speed;
+          this.projectile(p, w.id, 'spark', p.x, p.z, Math.cos(a) * sp, Math.sin(a) * sp, 1.6 * ws.duration, 0.3, ws, { tracked: true, wander: 1 });
+        }
+        return true;
+      }
+      case 'ricochet': {
+        const targets = this.enemiesNear(p.x, p.z, 14, ws.amount);
+        for (let i = 0; i < ws.amount; i++) {
+          const t = targets[i % Math.max(1, targets.length)];
+          const a = t ? Math.atan2(t.z - p.z, t.x - p.x) : this.rand() * Math.PI * 2;
+          const sp = 13 * ws.speed;
+          this.projectile(p, w.id, 'shuriken', p.x, p.z, Math.cos(a) * sp, Math.sin(a) * sp, 2.2, 0.3, ws, { tracked: true, pierce: 9999, bounces: ws.chain });
+        }
+        return true;
+      }
+      case 'spiral': {
+        const a0 = this.rand() * Math.PI * 2;
+        for (let i = 0; i < ws.amount; i++) {
+          this.projectile(p, w.id, 'hammer', p.x, p.z, 0, 0, 2.6 * ws.duration, 0.45 * Math.sqrt(ws.area), ws,
+            { tracked: true, pierce: 9999, rehit: 0.4, spiral: { a0: a0 + (i / ws.amount) * Math.PI * 2, rMax: 5 * ws.area, turns: 1.5 * ws.speed } });
+        }
+        return true;
+      }
+      case 'chain': {
+        const starts = this.enemiesNear(p.x, p.z, ws.range || 8, ws.amount);
+        const used = new Set();
+        for (const t of starts) {
+          if (used.has(t)) continue;
+          used.add(t);
+          this.ev('arc', r2(p.x), r2(p.z), r2(t.x), r2(t.z));
+          this.hit(t, ws.dmg, p, w.id, t.x - p.x, t.z - p.z, 0.4);
+          let from = t, d = ws.dmg;
+          for (let c = 0; c < ws.chain; c++) {
+            const next = this.enemiesNear(from.x, from.z, 4.5, 6).find((e) => e !== from && !used.has(e));
+            if (!next) break;
+            used.add(next);
+            d *= 0.9;
+            this.ev('arc', r2(from.x), r2(from.z), r2(next.x), r2(next.z));
+            this.hit(next, d, p, w.id, next.x - from.x, next.z - from.z, 0.4);
+            from = next;
+          }
+        }
+        return true;
+      }
+      case 'rain': {
+        const pool = this.enemiesNear(p.x, p.z, 13, 25);
+        const c = pool.length ? pool[Math.floor(this.rand() * Math.min(pool.length, 8))] : null;
+        const cx = c ? c.x : p.x + (this.rand() - 0.5) * 8, cz = c ? c.z : p.z + (this.rand() - 0.5) * 6;
+        const R = 2.4 * ws.area, n = ws.amount, span = 0.8 * ws.duration;
+        const pts = [];
+        for (let i = 0; i < n; i++) {
+          const a = this.rand() * Math.PI * 2, rr = R * Math.sqrt(this.rand());
+          const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr, at = 0.35 + (i / n) * span + this.rand() * 0.05;
+          this.impacts.push({ at: this.t + at, x, z, r: 0.8 * Math.sqrt(ws.area), dmg: ws.dmg, owner: p, w: w.id, slow: ws.slow, freeze: ws.freeze });
+          pts.push(r2(x), r2(z), r2(at));
+        }
+        this.ev('rain', ws.vis, r2(R), r2(cx), r2(cz), pts);
+        return true;
+      }
+      case 'fissure': {
+        const base = this.aimAt(p, 12);
+        const lines = ws.lines || 1;
+        const r = 1.0 * Math.sqrt(ws.area), gap = 1.15 * Math.sqrt(ws.area), dt = 0.07 / ws.speed;
+        for (let l = 0; l < lines; l++) {
+          const a = base + (lines > 1 ? (l / (lines - 1) - 0.5) * 1.1 : 0);
+          const dx = Math.cos(a), dz = Math.sin(a);
+          for (let i = 1; i <= ws.amount; i++) this.impacts.push({ at: this.t + i * dt, x: p.x + dx * i * gap, z: p.z + dz * i * gap, r, dmg: ws.dmg, owner: p, w: w.id, kb: 1.2 });
+          this.ev('fis', ws.vis, r2(p.x), r2(p.z), r2(dx), r2(dz), ws.amount, r2(gap), r2(dt), r2(r));
+        }
+        return true;
+      }
+      case 'beam': {
+        const len = (ws.range || 9) * Math.sqrt(ws.area);
+        let angles = [];
+        if (ws.mode === 'cross') {
+          const n = ws.amount;
+          const off = this.rand() * 0.3;
+          for (let i = 0; i < n; i++) angles.push(off + (i / n) * Math.PI * 2);
+        } else {
+          const ts = this.enemiesNear(p.x, p.z, len, ws.amount);
+          angles = ts.map((t) => Math.atan2(t.z - p.z, t.x - p.x));
+          while (angles.length < ws.amount) angles.push(Math.atan2(p.dirz, p.dirx) + angles.length * 0.4);
+        }
+        const dur = 1.0 * ws.duration;
+        this.beams.push({ owner: p, w: w.id, angles, len, width: 0.45 * ws.area, until: this.t + dur, t0: this.t, tick: ws.tick, next: 0, dmg: ws.dmg, rot: ws.rotate ? 0.9 : 0, cone: 0 });
+        this.ev('beam', p.id, ws.vis, angles.map(r2), r2(len), r2(0.45 * ws.area), r2(dur), ws.rotate ? 0.9 : 0);
+        return true;
+      }
+      case 'cone': {
+        const len = (ws.range || 5) * ws.area;
+        const a = this.aimAt(p, len + 2);
+        const dur = 1.4 * ws.duration;
+        this.beams.push({ owner: p, w: w.id, angles: [a], len, width: 0, until: this.t + dur, t0: this.t, tick: ws.tick, next: 0, dmg: ws.dmg, rot: 0, cone: (ws.arc || 0.9) / 2, aim: true });
+        this.ev('cone', p.id, ws.vis, r2(a), r2(len), r2(ws.arc || 0.9), r2(dur));
+        return true;
+      }
+      case 'vortex': {
+        for (let i = 0; i < ws.amount; i++) {
+          let x = p.x, z = p.z, vx, vz;
+          const R = (ws.vis === 'wind' ? 1.6 : 2.6) * ws.area;
+          if (ws.vis === 'void') {
+            const pool = this.enemiesNear(p.x, p.z, 11, 20);
+            const c = pool.length ? pool[Math.floor(this.rand() * pool.length)] : null;
+            x = c ? c.x : p.x + (this.rand() - 0.5) * 8;
+            z = c ? c.z : p.z + (this.rand() - 0.5) * 6;
+            const a = this.rand() * Math.PI * 2;
+            vx = Math.cos(a) * 0.7 * ws.speed; vz = Math.sin(a) * 0.7 * ws.speed;
+          } else {
+            const a = this.aimAt(p, 12) + (i - (ws.amount - 1) / 2) * 0.8;
+            vx = Math.cos(a) * 5 * ws.speed; vz = Math.sin(a) * 5 * ws.speed;
+          }
+          this.projectile(p, w.id, ws.vis, x, z, vx, vz, (ws.vis === 'wind' ? 3.2 : 4) * ws.duration, R, ws,
+            { tracked: true, pierce: 9999, rehit: 9999, vortex: { R, pull: ws.pull || 2, tick: ws.tick || 0.3, next: 0 }, wander: ws.vis === 'wind' ? 0.6 : 0.15 });
+        }
+        return true;
+      }
+      case 'mine': {
+        for (let i = 0; i < ws.amount; i++) {
+          const a = this.rand() * Math.PI * 2, d = i === 0 ? 0.4 : 1 + this.rand() * 1.5;
+          const id = this.id();
+          const m = { id, x: p.x + Math.cos(a) * d, z: p.z + Math.sin(a) * d, arm: this.t + 0.45, until: this.t + 10 * ws.duration, r: 2.2 * Math.sqrt(ws.area), dmg: ws.dmg, owner: p, w: w.id, chainy: !!ws.evolved };
+          this.mines.push(m);
+          this.ev('mine', id, r2(m.x), r2(m.z), ws.evolved ? 1 : 0);
+        }
+        if (this.mines.length > 60) this.detonate(this.mines[0]);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // a spinning storm of blades around the player while it lasts
+  tickSpin(p, w, ws) {
+    const R = 2.4 * ws.area;
+    if (w.spinUntil > this.t) {
+      w.tickT = (w.tickT || 0) - DT;
+      if (w.tickT <= 0) {
+        w.tickT = ws.tick;
+        for (const e of this.enemiesNear(p.x, p.z, R)) this.hit(e, ws.dmg, p, w.id, e.x - p.x, e.z - p.z, ws.kb);
+      }
+      if (ws.pull) for (const e of this.enemiesNear(p.x, p.z, R * 1.7)) {
+        if (e.def.boss) continue;
+        const dx = p.x - e.x, dz = p.z - e.z, d = Math.hypot(dx, dz) || 1;
+        if (d > R * 0.6) { e.x += (dx / d) * ws.pull * DT; e.z += (dz / d) * ws.pull * DT; }
+      }
+      if (w.spinUntil - this.t <= DT) w.timer = ws.cd;
+      return;
+    }
+    w.timer -= DT;
+    if (w.timer > 0) return;
+    const dur = 2.2 * ws.duration;
+    w.spinUntil = this.t + dur;
+    w.tickT = 0;
+    this.ev('spin', p.id, ws.vis, r2(R), r2(dur), ws.evolved ? 1 : 0);
+  }
+
+  // skeletons, wolves and turrets: summoned one at a time up to the ability's amount
+  tickSummon(p, w, ws) {
+    const mine = this.minions.filter((m) => m.w === w && !m.dead);
+    if (mine.length >= ws.amount) { w.timer = Math.min(w.timer, ws.cd * 0.5); return; }
+    w.timer -= DT;
+    if (w.timer > 0) return;
+    w.timer = ws.vis === 'turret' ? ws.cd : Math.min(1.2, ws.cd * 0.4);
+    const a = this.rand() * Math.PI * 2;
+    const m = {
+      id: this.id(), vis: ws.vis, w, owner: p, x: p.x + Math.cos(a) * 1.2, z: p.z + Math.sin(a) * 1.2, left: false, atkT: 0.5, target: null,
+      until: ws.vis === 'turret' ? this.t + 10 * ws.duration : Infinity, slot: mine.length,
+    };
+    this.minions.push(m);
+    this.ev('summon', m.id, ws.vis, r2(m.x), r2(m.z), ws.evolved ? 1 : 0);
+  }
+
+  // fire / plague left behind wherever the player walks
+  tickTrail(p, w, ws) {
+    w.timer -= DT;
+    if (w.timer > 0) return;
+    w.timer = ws.cd;
+    if (w.lx !== undefined && (p.x - w.lx) ** 2 + (p.z - w.lz) ** 2 < 0.25) return;
+    w.lx = p.x;
+    w.lz = p.z;
+    const z = { id: this.id(), x: p.x, z: p.z, r: 0.9 * ws.area, life: 2.4 * ws.duration, tick: ws.tick, next: 0, dmg: ws.dmg, owner: p, w: w.id, slow: ws.slow, kind: ws.vis };
+    this.zones.push(z);
+    this.ev('zn', z.id, r2(z.x), r2(z.z), r2(z.r), r2(z.life), z.kind);
+  }
+
+  thorns(p, hook) {
+    const ws = hook.ws;
+    p.thornT = this.t + (ws.pulse ? 1 : ws.cd || 0.6);
+    const R = 3 * ws.area;
+    this.ev('nv', p.id, r2(R), 0, 'thorn');
+    for (const e of this.enemiesNear(p.x, p.z, R)) this.hit(e, ws.dmg, p, hook.w.id, e.x - p.x, e.z - p.z, ws.kb);
+  }
+
+  updateImpacts() {
+    for (let i = this.impacts.length - 1; i >= 0; i--) {
+      const m = this.impacts[i];
+      if (this.t < m.at) continue;
+      this.impacts.splice(i, 1);
+      for (const e of [...this.grid.query(m.x, m.z, m.r + MAX_ENEMY_R)]) {
+        if (e.dead || (e.x - m.x) ** 2 + (e.z - m.z) ** 2 > (m.r + e.r) ** 2) continue;
+        this.hit(e, m.dmg, m.owner, m.w, e.x - m.x, e.z - m.z, m.kb || 0.3);
+        if (m.freeze && !e.def.boss) e.frozen = Math.max(e.frozen, m.freeze);
+        else if (m.slow) { e.slow = 1; e.slowK = 1 - m.slow; }
+      }
+    }
+  }
+
+  // beams (lines from the caster) and cones; both follow the caster while they last
+  updateBeams() {
+    for (let i = this.beams.length - 1; i >= 0; i--) {
+      const b = this.beams[i];
+      const p = b.owner;
+      if (this.t >= b.until || p.state !== PS.ALIVE) { this.beams.splice(i, 1); continue; }
+      b.next -= DT;
+      if (b.next > 0) continue;
+      b.next = b.tick;
+      const hitSet = new Set();
+      for (const e of this.enemiesNear(p.x, p.z, b.len + 1)) {
+        const dx = e.x - p.x, dz = e.z - p.z, d = Math.hypot(dx, dz);
+        for (const a0 of b.angles) {
+          const a = a0 + b.rot * (this.t - b.t0);
+          if (b.cone) {
+            let da = Math.atan2(dz, dx) - a;
+            while (da > Math.PI) da -= Math.PI * 2;
+            while (da < -Math.PI) da += Math.PI * 2;
+            if (Math.abs(da) > b.cone || d > b.len) continue;
+          } else {
+            const along = dx * Math.cos(a) + dz * Math.sin(a);
+            const across = Math.abs(-dx * Math.sin(a) + dz * Math.cos(a));
+            if (along < 0 || along > b.len || across > b.width + e.r) continue;
+          }
+          hitSet.add(e);
+          break;
+        }
+      }
+      for (const e of hitSet) this.hit(e, b.dmg, p, b.w, e.x - p.x, e.z - p.z, 0.25);
+    }
+  }
+
+  updateMines() {
+    for (let i = this.mines.length - 1; i >= 0; i--) {
+      const m = this.mines[i];
+      if (m.gone) { this.mines.splice(i, 1); continue; }
+      if (this.t >= m.until) { this.mines.splice(i, 1); this.ev('md', m.id); continue; }
+      if (this.t < m.arm) continue;
+      if (this.grid.query(m.x, m.z, 1.4).some((e) => !e.dead && !e.def.prop && (e.x - m.x) ** 2 + (e.z - m.z) ** 2 < (1 + e.r) ** 2)) this.detonate(m);
+    }
+  }
+
+  detonate(m) {
+    if (m.gone) return;
+    m.gone = true;
+    this.ev('md', m.id);
+    this.explode(m.x, m.z, m.r, m.dmg, m.owner, m.w, 1.4, 'trap');
+    if (m.chainy) for (const o of this.mines) if (!o.gone && (o.x - m.x) ** 2 + (o.z - m.z) ** 2 < m.r * m.r) o.arm = Math.min(o.arm, this.t), o.until = Math.min(o.until, this.t + 0.15);
+  }
+
+  updateMinions() {
+    for (let i = this.minions.length - 1; i >= 0; i--) {
+      const m = this.minions[i];
+      const p = m.owner;
+      const ws = p.ws.get(m.w.id);
+      if (!ws || this.t >= m.until || !p.weapons.includes(m.w)) {
+        this.minions.splice(i, 1);
+        this.ev('unsummon', m.id);
+        continue;
+      }
+      m.atkT -= DT;
+      if (m.vis === 'turret') {
+        if (m.atkT <= 0) {
+          const t = this.enemiesNear(m.x, m.z, ws.range || 9, 1)[0];
+          if (t) {
+            m.atkT = ws.atk || 0.5;
+            const a = Math.atan2(t.z - m.z, t.x - m.x), sp = 16;
+            m.left = t.x < m.x;
+            this.projectile(p, m.w.id, ws.explode ? 'shell' : 'bolt', m.x, m.z, Math.cos(a) * sp, Math.sin(a) * sp, 0.9, 0.3, ws, { pierce: 1, explode: ws.explode ? ws.explode : 0 });
+          }
+        }
+        continue;
+      }
+      // melee minions: hunt foes near their master, otherwise heel
+      if (!m.target || m.target.dead || (m.target.x - p.x) ** 2 + (m.target.z - p.z) ** 2 > 100) {
+        m.target = this.enemiesNear(m.x, m.z, 7, 1)[0] || null;
+        if (m.target && (m.target.x - p.x) ** 2 + (m.target.z - p.z) ** 2 > 100) m.target = null;
+      }
+      const sp = (m.vis === 'wolf' ? 7 : 4.6) * ws.speed;
+      let tx, tz;
+      if (m.target) { tx = m.target.x; tz = m.target.z; }
+      else { const a = this.t * 0.6 + m.slot * 2.1; tx = p.x + Math.cos(a) * 2; tz = p.z + Math.sin(a) * 2; }
+      const dx = tx - m.x, dz = tz - m.z, d = Math.hypot(dx, dz) || 1;
+      const reach = m.target ? 0.75 + m.target.r : 0.3;
+      if (d > reach) {
+        const st = Math.min(d - reach * 0.8, sp * DT);
+        m.x += (dx / d) * st;
+        m.z += (dz / d) * st;
+        if (Math.abs(dx) > 0.05) m.left = dx < 0;
+      } else if (m.target && m.atkT <= 0) {
+        m.atkT = ws.atk || 0.7;
+        this.hit(m.target, ws.dmg, p, m.w.id, dx, dz, 0.6);
+        if (ws.lifebite) this.heal(p, 1);
+      }
+      if (d > 30) { m.x = p.x; m.z = p.z; }
     }
   }
 
@@ -597,7 +1015,7 @@ export class Run {
       pierce: extra.pierce ?? ws.pierce, hit: new Set(), hitT: new Map(), split: ws.split || 0, ...extra,
     };
     this.projectiles.push(pr);
-    this.ev('pj', pr.id, kind, r2(x), r2(z), r2(vx), r2(vz), r2(life), p.id);
+    this.ev('pj', pr.id, kind, r2(x), r2(z), r2(vx), r2(vz), r2(life), p.id, r2(r));
     return pr;
   }
 
@@ -639,6 +1057,53 @@ export class Run {
           pr.vz = Math.sin(cur + turn) * sp;
         }
       }
+      if (pr.spiral) {
+        // hammers spiral outward around their thrower
+        const o = pr.owner, k = Math.min(1, pr.age / pr.life);
+        const rr = 0.6 + (pr.spiral.rMax - 0.6) * k, a = pr.spiral.a0 + k * pr.spiral.turns * Math.PI * 2;
+        pr.vx = (o.x + Math.cos(a) * rr - pr.x) / DT;
+        pr.vz = (o.z + Math.sin(a) * rr - pr.z) / DT;
+      }
+      if (pr.wander) {
+        const a = Math.atan2(pr.vz, pr.vx) + (this.rand() - 0.5) * pr.wander * 1.6, sp = Math.hypot(pr.vx, pr.vz);
+        pr.vx = Math.cos(a) * sp;
+        pr.vz = Math.sin(a) * sp;
+      }
+      if (pr.emit) {
+        pr.emitT -= DT;
+        if (pr.emitT <= 0) {
+          pr.emitT = pr.emit;
+          for (let k = 0; k < 3; k++) {
+            const a = pr.emitA + k * 2.094;
+            this.projectile(pr.owner, pr.w, 'shard', pr.x, pr.z, Math.cos(a) * 10, Math.sin(a) * 10, 0.5, 0.22, { dmg: pr.shard.dmg, kb: 0.2, pierce: 1 }, { slowHit: pr.shard.slow, freezeHit: pr.shard.freeze });
+          }
+          pr.emitA += 0.55;
+        }
+      }
+      if (pr.zapR) {
+        pr.zapT -= DT;
+        if (pr.zapT <= 0) {
+          pr.zapT = pr.zapEvery;
+          const near = this.enemiesNear(pr.x, pr.z, pr.zapR, 8);
+          near.forEach((e, k) => {
+            if (k < 2) this.ev('arc', r2(pr.x), r2(pr.z), r2(e.x), r2(e.z));
+            this.hit(e, pr.dmg, pr.owner, pr.w, e.x - pr.x, e.z - pr.z, 0.1);
+          });
+        }
+      }
+      if (pr.vortex) {
+        const V = pr.vortex;
+        for (const e of this.enemiesNear(pr.x, pr.z, V.R * 1.6)) {
+          if (e.def.boss) continue;
+          const dx = pr.x - e.x, dz = pr.z - e.z, d = Math.hypot(dx, dz) || 1;
+          if (d > 0.4) { e.x += (dx / d) * V.pull * DT; e.z += (dz / d) * V.pull * DT; }
+        }
+        V.next -= DT;
+        if (V.next <= 0) {
+          V.next = V.tick;
+          for (const e of this.enemiesNear(pr.x, pr.z, V.R)) this.hit(e, pr.dmg, pr.owner, pr.w, 0, 0, 0);
+        }
+      }
       pr.x += pr.vx * DT;
       pr.z += pr.vz * DT;
       if (!remove) {
@@ -651,13 +1116,28 @@ export class Run {
             if (pr.hit.has(e.id)) continue;
             pr.hit.add(e.id);
           }
-          if (pr.explode) {
-            this.explode(pr.x, pr.z, pr.explode, pr.dmg, pr.owner, pr.w, pr.kb, 'fire');
+          if (pr.explode && pr.pierce < 90) {
+            this.explode(pr.x, pr.z, pr.explode, pr.dmg, pr.owner, pr.w, pr.kb, pr.kind === 'orb' ? 'fire' : 'spark');
             pr.exploded = true;
             remove = true;
             break;
           }
           this.hit(e, pr.dmg, pr.owner, pr.w, pr.vx, pr.vz, pr.kb);
+          if (pr.explode) this.explode(e.x, e.z, pr.explode, pr.dmg * 0.6, pr.owner, pr.w, pr.kb, 'spark');
+          if (pr.freezeHit && !e.def.boss) e.frozen = Math.max(e.frozen, pr.freezeHit);
+          else if (pr.slowHit) { e.slow = 1.2; e.slowK = 1 - pr.slowHit; }
+          if (pr.bounces !== undefined) {
+            // ricochet to the next foe nearby
+            const next = pr.bounces > 0 ? this.enemiesNear(e.x, e.z, 7, 8).find((n) => n !== e && !pr.hit.has(n.id)) : null;
+            if (next) {
+              pr.bounces--;
+              const sp = Math.hypot(pr.vx, pr.vz) || 12, dx = next.x - pr.x, dz = next.z - pr.z, d = Math.hypot(dx, dz) || 1;
+              pr.vx = (dx / d) * sp;
+              pr.vz = (dz / d) * sp;
+              pr.age = Math.min(pr.age, pr.life - 1.2);
+            } else remove = true;
+            break;
+          }
           if (pr.split && !pr.child) {
             for (let k = 0; k < pr.split; k++) {
               const a = Math.atan2(pr.vz, pr.vx) + (k ? 1 : -1) * 0.9;
@@ -711,6 +1191,7 @@ export class Run {
         if (e.dead || (e.x - z.x) ** 2 + (e.z - z.z) ** 2 > (z.r + e.r * 0.5) ** 2) continue;
         this.hit(e, z.dmg, z.owner, z.w, 0, 0, 0);
         if (z.slow) { e.slow = 0.6; e.slowK = 1 - z.slow; }
+        if (z.hex) { e.hexUntil = this.t + z.tick + 0.3; e.hexK = z.hex; }
       }
     }
   }
@@ -727,7 +1208,15 @@ export class Run {
   // ---------------------------------------------------------------- damage
   hit(e, dmg, owner, w, dx, dz, kb) {
     if (e.dead) return;
+    if (owner && owner.buffUntil > this.t) dmg *= 1 + owner.buffK;
+    if (e.hexUntil > this.t) dmg *= 1 + e.hexK;
     dmg = Math.max(1, dmg * (0.9 + this.rand() * 0.2));
+    const lh = owner && owner.hooks && owner.hooks.leech;
+    if (lh && owner.leechBudget > 0 && !e.def.prop && owner.state === PS.ALIVE) {
+      const h = Math.min(owner.leechBudget, dmg * lh.ws.heal);
+      owner.leechBudget -= h;
+      this.heal(owner, h);
+    }
     e.hp -= dmg;
     e.flash = 0.12;
     if (owner) owner.dmg[w] = (owner.dmg[w] || 0) + dmg;
@@ -753,7 +1242,17 @@ export class Run {
     }
     this.kills++;
     if (owner) owner.kills++;
-    if (def.xp) this.dropGem(e.x, e.z, def.xp);
+    for (const p of this.players.values()) {
+      const hk = p.hooks && p.hooks.corpse;
+      if (!hk || p.state !== PS.ALIVE || this.burstDepth >= (hk.ws.chainBurst ? 3 : 1)) continue;
+      if ((p.x - e.x) ** 2 + (p.z - e.z) ** 2 > (hk.ws.range || 7) ** 2) continue;
+      if (this.rand() > hk.ws.chance * Math.sqrt(p.stats.luck)) continue;
+      this.burstDepth++;
+      this.explode(e.x, e.z, 1.7 * hk.ws.area, hk.ws.dmg, p, hk.w.id, 1, 'bone');
+      this.burstDepth--;
+      break;
+    }
+    if (def.xp) this.dropGem(e.x, e.z, def.xp * TIER_XP[e.tier || 1]);
     if (def.elite || (def.boss && !def.final)) {
       this.spawnPickup('chest', e.x, e.z);
       if (def.boss) for (let i = 0; i < 6; i++) this.dropGem(e.x + (this.rand() - 0.5) * 3, e.z + (this.rand() - 0.5) * 3, Math.round(def.xp / 6));
@@ -762,11 +1261,12 @@ export class Run {
       this.finish('victory');
       return;
     }
-    const luck = owner ? owner.stats.luck : 1;
+    const luck = (owner ? owner.stats.luck : 1) * this.pickupMul;
+    const P = BALANCE.pickups;
     const r = this.rand();
-    if (r < 0.012 * luck * this.pickupMul) this.spawnPickup('coin', e.x, e.z);
-    else if (r < 0.015 * luck * this.pickupMul) this.spawnPickup('bag', e.x, e.z);
-    else if (r < 0.0165 * luck * this.pickupMul) this.spawnPickup('roast', e.x, e.z);
+    if (r < P.coin * luck) this.spawnPickup('coin', e.x, e.z);
+    else if (r < (P.coin + P.bag) * luck) this.spawnPickup('bag', e.x, e.z);
+    else if (r < (P.coin + P.bag + P.roast) * luck) this.spawnPickup('roast', e.x, e.z);
   }
 
   dropFromBrazier(x, z) {
@@ -794,11 +1294,43 @@ export class Run {
     this.ps.push([pk.id, kind, r2(x), r2(z)]);
   }
 
+  respawn(p) {
+    const B = BALANCE.players;
+    let best = null, bd = Infinity;
+    for (const q of this.players.values()) {
+      if (q === p || q.state !== PS.ALIVE) continue;
+      const d = (q.x - p.x) ** 2 + (q.z - p.z) ** 2;
+      if (d < bd) { bd = d; best = q; }
+    }
+    if (best) { p.x = best.x + (this.rand() - 0.5) * 2; p.z = best.z + (this.rand() - 0.5) * 2; }
+    p.state = PS.ALIVE;
+    p.hp = Math.round(p.maxHp * B.respawnHp);
+    p.iframes = B.respawnShield;
+    p.shieldT = B.respawnShield;
+    p.reviveProg = 0;
+    p.respawnT = 0;
+    this.ev('up', p.id, best ? best.id : -1, r2(p.x), r2(p.z));
+    for (const e of this.enemiesNear(p.x, p.z, 3.5)) this.hit(e, 1, p, 'revival', e.x - p.x, e.z - p.z, 3);
+  }
+
   damagePlayer(p, dmg) {
     if (p.state !== PS.ALIVE || p.iframes > 0) return;
-    const d = Math.max(1, Math.round(dmg * this.diff.dmg - p.stats.armor));
+    let d = Math.max(1, Math.round(dmg * this.diff.dmg - p.stats.armor));
+    p.lastHurt = this.t;
+    p.iframes = BALANCE.players.hitInvuln;
+    const hk = p.hooks || {};
+    if (hk.thorns && this.t >= p.thornT) this.thorns(p, hk.thorns);
+    if (p.shieldHP > 0) {
+      const a = Math.min(p.shieldHP, d);
+      p.shieldHP -= a;
+      d -= a;
+      if (p.shieldHP <= 0 && hk.shield && hk.shield.ws.burst) {
+        this.ev('nv', p.id, 3.5, 0, 'bone');
+        for (const e of this.enemiesNear(p.x, p.z, 3.5)) this.hit(e, hk.shield.ws.burst, p, hk.shield.w.id, e.x - p.x, e.z - p.z, 2);
+      }
+      if (d <= 0) { this.ev('blk', p.id, a); return; }
+    }
     p.hp -= d;
-    p.iframes = 0.15;
     this.ev('hurt', p.id, d);
     if (p.hp > 0) return;
     if (p.revival > 0) {
@@ -812,6 +1344,7 @@ export class Run {
     p.hp = 0;
     p.state = PS.DOWNED;
     p.reviveProg = 0;
+    p.respawnT = BALANCE.players.respawnSeconds;
     p.pending.length = 0;
     this.ev('dn', p.id, this.reviveOn ? 1 : 0);
   }
@@ -921,7 +1454,7 @@ export class Run {
         if (p.state !== PS.ALIVE) continue;
         const rr = e.r + PLAYER_RADIUS;
         if ((p.x - e.x) ** 2 + (p.z - e.z) ** 2 < rr * rr) {
-          this.damagePlayer(p, e.def.dmg * (1 + 0.5 * this.frac()));
+          this.damagePlayer(p, e.def.dmg * TIER_DMG[e.tier || 1] * this.dmgMul());
           e.atkCd = 0.6;
           break;
         }
@@ -1123,7 +1656,8 @@ export class Run {
     const owned = new Set(p.weapons.map((w) => w.id));
     for (const w of p.weapons) if (w.lvl < maxLevel(w.id)) pool.push([{ k: 'w', id: w.id, lvl: w.lvl + 1 }, 3]);
     if (p.weapons.length < MAX_WEAPONS) {
-      for (const id of BASE_WEAPONS) {
+      for (const id of SHARED_WEAPONS) {
+        if (!p.unlocks.has(id)) continue;
         const evolvedOwned = WEAPONS[id].evolve && owned.has(WEAPONS[id].evolve.into);
         if (!owned.has(id) && !evolvedOwned) pool.push([{ k: 'w', id, lvl: 1, new: true }, 1.6]);
       }
@@ -1273,7 +1807,7 @@ export class Run {
       if (e.def.boss) f |= EF.BOSS;
       if (e.slow > 0) f |= EF.SLOW;
       if (e.age < 0.4) f |= EF.SPAWN;
-      enemies.push({ id: e.id, type: e.type, flags: f, x: e.x, z: e.z });
+      enemies.push({ id: e.id, type: e.type, tier: e.tier || 1, flags: f, x: e.x, z: e.z });
       if (e.def.elite || e.def.boss) bars.push([e.id, Math.max(0, e.hp / e.maxHp)]);
     }
     const tp = [];
@@ -1289,12 +1823,14 @@ export class Run {
       xn: this.xpNext,
       k: this.kills,
       fz: this.freezeT > 0 ? 1 : 0,
-      p: [...this.players.values()].map((p) => [p.id, r2(p.x), r2(p.z), p.fx, Math.ceil(p.hp), p.maxHp, p.state, Math.round(p.reviveProg * 100), p.iframes > 0.3 ? 1 : 0, p.gold, p.kills]),
+      p: [...this.players.values()].map((p) => [p.id, r2(p.x), r2(p.z), p.fx, Math.ceil(p.hp), p.maxHp, p.state, Math.round(p.reviveProg * 100), p.iframes > 0.3 ? 1 : 0, p.gold, p.kills, p.shieldT > 0 ? Math.ceil(p.shieldT * 10) / 10 : 0, p.state === PS.DOWNED ? Math.ceil(p.respawnT) : 0, Math.ceil(p.shieldHP), p.shieldMax, p.buffUntil > this.t ? 1 : 0]),
+      mn: this.minions.length ? this.minions.map((m) => [m.id, m.vis, r2(m.x), r2(m.z), m.left ? 1 : 0, m.owner.id]) : undefined,
       ev: this.events,
       gs: this.gs, gm: this.gm, gc: this.gc, ps: this.ps, pc: this.pc, tp,
       waiting: this.phase === PHASE.LEVELUP ? [...this.choices].filter(([, c]) => !c.picked).map(([id]) => id) : undefined,
       lt: this.phase === PHASE.LEVELUP ? Math.max(0, Math.ceil(LEVELUP_TIMEOUT - this.levelT)) : undefined,
       res: this.phase === PHASE.OVER ? this.result : undefined,
+      pz: this.paused ? this.paused.name : undefined,
     };
     const buf = encodeSnapshot({ tick: this.game.tick, ox, oz, enemies, bars, dmg: this.dmgNums, kills: this.killList, json });
     this.events = [];

@@ -31,7 +31,7 @@ export class Game {
   }
 
   // ---------------------------------------------------------------- lobby
-  addPlayer(clientId, name, c, meta) {
+  addPlayer(clientId, name, c, meta, unlocks) {
     if (this.players.size >= MAX_PLAYERS) return { ok: false, why: 'full' };
     if (this.phase !== PHASE.LOBBY && this.phase !== PHASE.COUNTDOWN) return { ok: false, why: 'busy' };
     const used = new Set([...this.players.values()].map((p) => p.seat));
@@ -41,7 +41,7 @@ export class Game {
     const cleanName = String(name || '').replace(/[^\w \-'.!?]/g, '').trim().slice(0, 14) || `Traveler ${seat + 1}`;
     const ci = Number.isInteger(c) && c >= 0 && c < CHARACTERS.length ? c : seat % CHARACTERS.length;
     const [lx, lz] = LOBBY_SPAWNS[seat] || [0, 0];
-    this.players.set(id, { id, clientId, name: cleanName, char: ci, ready: false, seat, meta: sanitizeMeta(meta), lx, lz, ldx: 0, ldz: 1, lt: this.time });
+    this.players.set(id, { id, clientId, name: cleanName, char: ci, ready: false, seat, meta: sanitizeMeta(meta), unlocks: Array.isArray(unlocks) ? unlocks.slice(0, 64) : [], lx, lz, ldx: 0, ldz: 1, lt: this.time });
     if (this.phase === PHASE.COUNTDOWN) this.setPhase(PHASE.LOBBY);
     this.rosterDirty = true;
     return { ok: true, id };
@@ -70,10 +70,11 @@ export class Game {
     this.rosterDirty = true;
   }
 
-  setMeta(id, ranks) {
+  setMeta(id, ranks, unlocks) {
     const p = this.players.get(id);
     if (!p || this.phase !== PHASE.LOBBY) return;
     p.meta = sanitizeMeta(ranks);
+    if (Array.isArray(unlocks)) p.unlocks = unlocks.slice(0, 64);
   }
 
   setSetting(clientId, key, val) {
@@ -84,6 +85,26 @@ export class Game {
     if (v < 0 || v >= d.options.length) return;
     this.settings[key] = v;
     this.rosterDirty = true;
+  }
+
+  // any traveler can pause the expedition for everyone (Esc menu); it resumes when they close it
+  setPause(clientId, v) {
+    const run = this.run;
+    if (!run || run.phase === PHASE.OVER) return;
+    const mine = [...this.players.values()].filter((p) => p.clientId === clientId);
+    if (!mine.length) return;
+    if (v) run.paused = { cid: clientId, name: mine[0].name };
+    else run.paused = null;
+  }
+
+  dropPause(clientId) {
+    if (this.run && this.run.paused && this.run.paused.cid === clientId) this.run.paused = null;
+  }
+
+  abandon(clientId) {
+    if (clientId !== this.hostClient || !this.run || this.run.phase === PHASE.OVER) return;
+    this.run.paused = null;
+    this.run.finish('defeat');
   }
 
   backToLobby(clientId) {
@@ -125,7 +146,7 @@ export class Game {
         break;
       default:
         if (this.run) {
-          this.run.step();
+          if (!this.run.paused || this.run.phase === PHASE.OVER) this.run.step();
           if (this.run.phase !== this.phase) {
             this.phase = this.run.phase;
             this.rosterDirty = true;

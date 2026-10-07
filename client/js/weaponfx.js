@@ -95,6 +95,24 @@ const GROUND_FS = /* glsl */ `
 
 const groundGeo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
 
+// zone looks: main + edge color, particles
+const ZONES = {
+  acid: { c: '#9ae05a', c2: '#2e6a22', p: [0.7, 1.3, 0.5] },
+  plague: { c: '#c87aee', c2: '#4a2268', p: [1.1, 0.6, 1.4] },
+  hex: { c: '#b05aff', c2: '#2a0a3a', p: [1.0, 0.4, 1.5], part: 'star', a: 0.55 },
+  fire: { c: '#ffb03a', c2: '#a8301a', p: [1.6, 0.7, 0.2], part: 'flame', a: 0.55, k: 1.1, quiet: true },
+};
+// novas by look: ring colors + particles
+const NOVAS = {
+  quake: { c: '#ffcf8a', c2: '#6a4a2a', part: 'smoke', add: false, p: [0.55, 0.45, 0.35], up: 1 },
+  shout: { c: '#fff4dc', c2: '#c8a050', part: 'star', p: [1.4, 1.2, 0.6], light: 0xffe0a0 },
+  blood: { c: '#ff6a6a', c2: '#6a0a1a', part: 'dot', p: [1.5, 0.2, 0.25], light: 0xff4a4a },
+  song: { c: '#ffe08a', c2: '#b0703a', part: 'note', p: [1.4, 1.1, 0.5], light: 0xffd27a },
+  thorn: { c: '#9ae05a', c2: '#3a5a1a', part: 'leaf', p: [0.6, 1.1, 0.4], up: 1 },
+  bone: { c: '#fff4dc', c2: '#8a7a5a', part: 'shard', add: false, p: [0.95, 0.9, 0.8] },
+};
+const BEAMS = { holy: [1.6, 1.4, 0.7], sun: [1.7, 1.1, 0.4] };
+
 function C(hex, k = 1) {
   return new THREE.Color(hex).multiplyScalar(k);
 }
@@ -193,6 +211,9 @@ export class WeaponFX {
     this.revives = new Map(); // pid -> Ground
     this.lanes = new Map(); // boss id -> Ground
     this.zones = new Map(); // zone id -> Ground
+    this.actives = []; // spins, beams, cones and buffs that follow a traveler
+    this.drops = []; // falling arrows / hail, fissure eruptions
+    this.mineMap = new Map();
     this.time = 0;
   }
 
@@ -222,6 +243,13 @@ export class WeaponFX {
   }
 
   explosion(x, z, R, kind) {
+    if (kind === 'bone' || kind === 'spark') {
+      const bone = kind === 'bone';
+      this.add(new Ground(K.RING, x, z, R * 1.1, R * 1.1, { dur: 0.35, width: 0.14, color: bone ? C('#fff4dc', 1.6) : C('#d8f0ff', 2), color2: bone ? C('#9a8a6a', 1) : C('#4a8aff', 1.3), r0: 0.15 }));
+      this.P.burst(bone ? 10 : 8, { kind: bone ? 'shard' : 'spark', add: !bone, x, y: 0.5, z, jitter: R * 0.4, life: 0.5, size: 0.35, size1: 0.1, r: bone ? 0.95 : 0.8, g: bone ? 0.9 : 1.1, b: bone ? 0.8 : 1.7, speed: 5, up: 4, grav: 12, spin: 10 });
+      this.burstGlow(x, z, R * 1.8, bone ? [1.0, 0.9, 0.7] : [0.6, 0.9, 1.6], 0.15);
+      return;
+    }
     const meteor = kind === 'meteor';
     this.add(new Ground(K.RING, x, z, R * 1.1, R * 1.1, { dur: meteor ? 0.55 : 0.4, width: 0.16, color: C('#ffd27a', 2), color2: C('#ff5a1a', 1.4), r0: 0.15 }));
     this.add(new Ground(K.SCORCH, x, z, R * 0.9, R * 0.9, { dur: meteor ? 2.2 : 1.2, normal: true, color: C('#1a0e08'), fadeOut: 0.6, order: 1, y: 0.025 }));
@@ -243,18 +271,27 @@ export class WeaponFX {
   }
 
   zone(id, x, z, r, life, kind) {
-    const plague = kind === 'plague';
+    const P = ZONES[kind] || ZONES.acid;
     const g = this.add(new Ground(K.DISC, x, z, r, r, {
-      dur: life, fadeIn: 0.2, fadeOut: 0.5, normal: true, order: 1, y: 0.03,
-      color: plague ? C('#c87aee', 0.9) : C('#9ae05a', 0.8), color2: plague ? C('#4a2268') : C('#2e6a22'), alpha: 0.62,
+      dur: life, fadeIn: 0.2, fadeOut: 0.5, normal: !P.add, order: 1, y: 0.03,
+      color: C(P.c, P.k || 0.85), color2: C(P.c2), alpha: P.a || 0.62,
     }));
     this.zones.set(id, g);
-    this.P.burst(10, { kind: 'bubble', x, y: 0.2, z, jitter: r, life: 0.5, size: 0.3, size1: 0.1, r: plague ? 1.2 : 0.8, g: plague ? 0.6 : 1.4, b: plague ? 1.4 : 0.5, speed: 2.5, up: 3, grav: 6 });
-    g.bubbleK = plague ? [1.1, 0.6, 1.4] : [0.7, 1.3, 0.5];
+    if (!P.quiet) this.P.burst(8, { kind: P.part || 'bubble', x, y: 0.2, z, jitter: r, life: 0.5, size: 0.3, size1: 0.1, r: P.p[0], g: P.p[1], b: P.p[2], speed: 2.5, up: 3, grav: 6 });
+    g.bubbleK = P.p;
+    g.bubbleKind = P.part || 'bubble';
     g.r = r;
   }
 
-  zap(x, z, R, evo) {
+  zap(x, z, R, evo, vis) {
+    if (vis === 'holy') {
+      // a pillar of light instead of a bolt
+      this.flashes.push({ glow: true, pillar: true, x, y: 3, z, size: R * 1.2, c: [1.6, 1.4, 0.7], dur: 0.45, t: 0 });
+      this.add(new Ground(K.RING, x, z, R, R, { dur: 0.4, width: 0.18, color: C('#fff4c0', 2.2), color2: C('#ffc84a', 1.2), r0: 0.1 }));
+      this.P.burst(10, { kind: 'star', x, y: 0.3, z, jitter: R * 0.6, life: 0.6, size: 0.3, size1: 0.05, r: 1.6, g: 1.4, b: 0.7, speed: 1.5, up: 4, floor: false });
+      this.light(x, z, 0xffe0a0, 7, R * 4, 0.3, 2);
+      return;
+    }
     const col = evo ? C('#ffe08a', 3) : C('#bfe6ff', 3);
     const b = new Bolt(boltPoints(x + 0.6, 13, z - 1.5, x, 0.1, z, 10), col, 0.12, 0.22);
     const b2 = new Bolt(boltPoints(x + 0.6, 13, z - 1.5, x, 0.1, z, 10), evo ? C('#ffb03a', 1) : C('#4a8aff', 1), 0.42, 0.22);
@@ -273,7 +310,15 @@ export class WeaponFX {
     this.bolts.push(b);
   }
 
-  nova(px, pz, R, freeze) {
+  nova(px, pz, R, freeze, vis = 'frost') {
+    if (vis && vis !== 'frost' && NOVAS[vis]) {
+      const N = NOVAS[vis];
+      this.add(new Ground(K.RING, px, pz, R, R, { dur: 0.45, width: 0.14, color: C(N.c, 2), color2: C(N.c2, 1.2), r0: 0.08 }));
+      this.P.burst(16, { kind: N.part, add: N.add !== false, x: px, y: 0.5, z: pz, life: 0.5, size: 0.4, size1: 0.1, r: N.p[0], g: N.p[1], b: N.p[2], speed: R * 2, up: N.up || 1.5, drag: 2, spin: 6, floor: false });
+      if (N.light) this.light(px, pz, N.light, 4, R * 2.5, 0.3);
+      if (vis === 'quake' && this.hooks.shake) this.hooks.shake(0.25, px, pz);
+      return;
+    }
     this.add(new Ground(K.RING, px, pz, R, R, { dur: 0.45, width: 0.12, color: C('#e8f8ff', 2), color2: C('#4ab0ff', 1.4), r0: 0.08 }));
     this.add(new Ground(K.RING, px, pz, R * 0.75, R * 0.75, { dur: 0.6, width: 0.3, color: C('#8ad8ff', 0.8), color2: C('#2a6aff', 0.6), r0: 0.05 }));
     for (let i = 0; i < 18; i++) {
@@ -282,6 +327,133 @@ export class WeaponFX {
     }
     this.light(px, pz, 0x8ad8ff, freeze ? 7 : 4, R * 2.5, 0.3);
     if (freeze && this.hooks.flash) this.hooks.flash(0xbfe6ff, 0.18);
+  }
+
+  // ---------------------------------------------------------------- the wider arsenal
+  spin(pid, vis, R, dur, evo) {
+    this.actives.push({ type: 'spin', pid, R, until: this.time + dur, evo, vis });
+  }
+
+  beam(pid, vis, angles, len, width, dur, rot) {
+    this.actives.push({ type: 'beam', pid, vis, angles, len, width, until: this.time + dur, t0: this.time, rot });
+  }
+
+  cone(pid, vis, angle, len, arc, dur) {
+    this.actives.push({ type: 'cone', pid, vis, angle, len, arc, until: this.time + dur, t0: this.time });
+  }
+
+  rain(vis, R, cx, cz, pts) {
+    this.add(new Ground(K.WARN, cx, cz, R, R, { dur: 0.35 + (pts.length ? pts[pts.length - 1] : 0.8), color: vis === 'hail' ? C('#8ad8ff', 0.7) : C('#ffd27a', 0.6), order: 2, alpha: 0.5 }));
+    for (let i = 0; i < pts.length; i += 3) this.drops.push({ vis, x: pts[i], z: pts[i + 1], at: this.time + pts[i + 2], t0: this.time + pts[i + 2] - 0.35 });
+  }
+
+  fissure(vis, x, z, dx, dz, n, gap, dt, r) {
+    for (let i = 1; i <= n; i++) this.drops.push({ vis: 'earth', x: x + dx * i * gap, z: z + dz * i * gap, at: this.time + i * dt, t0: this.time + i * dt, r });
+  }
+
+  mine(id, x, z, evo) {
+    this.mineMap.set(id, { x, z, evo, t0: this.time });
+  }
+
+  mineGone(id) {
+    this.mineMap.delete(id);
+  }
+
+  summonPuff(x, z, vis) {
+    const c = vis === 'turret' ? [1.2, 1, 0.6] : [0.5, 1, 1.4];
+    this.P.burst(12, { kind: vis === 'turret' ? 'smoke' : 'dot', add: vis !== 'turret', x, y: 0.4, z, jitter: 0.6, life: 0.6, size: 0.4, size1: 0.05, r: c[0], g: c[1], b: c[2], speed: 1.5, up: 2.5, floor: false });
+    this.add(new Ground(K.RING, x, z, 1.2, 1.2, { dur: 0.4, width: 0.15, color: C(vis === 'turret' ? '#ffd27a' : '#8ae8ff', 1.4), color2: C('#2a6a8a', 0.8), r0: 0.1 }));
+  }
+
+  buff(pid, R, dur) {
+    this.actives.push({ type: 'buff', pid, R, until: this.time + Math.min(dur, 4) });
+  }
+
+  updateActives(ctx) {
+    const ents = this.ents, P = this.P, fx = this.fx, time = ctx.time, dt = ctx.dt;
+    const pos = new Map(ctx.players.map((p) => [p.id, p]));
+    let w = 0;
+    for (const a of this.actives) {
+      if (time >= a.until) continue;
+      this.actives[w++] = a;
+      const p = pos.get(a.pid);
+      if (!p) continue;
+      if (a.type === 'spin') {
+        const n = a.evo ? 8 : 5;
+        for (let i = 0; i < n; i++) {
+          const ang = time * 14 + (i / n) * Math.PI * 2;
+          const x = p.x + Math.cos(ang) * a.R * 0.85, z = p.z + Math.sin(ang) * a.R * 0.85;
+          ents.projL.push(x, 0.8, z, 1.1, 1.1, fx.axe, false, 1, 1, 1, 1, 0, 0, -time * 18);
+          if (Math.random() < dt * 20) P.spawn({ kind: 'spark', x, y: 0.8, z, life: 0.15, size: 0.3, size1: 0.05, r: 1.2, g: 1.1, b: 0.9, floor: false });
+        }
+        ents.flatL.push(p.x, 0.05, p.z, a.R * 2, a.R * 1.8, fx.ring, false, 0.9, 0.8, 0.6, 1, 0, 0, time * 8);
+      } else if (a.type === 'beam') {
+        const c = BEAMS[a.vis] || BEAMS.holy;
+        const k = Math.min(1, (time - a.t0) / 0.12) * Math.min(1, (a.until - time) / 0.15);
+        for (const a0 of a.angles) {
+          const ang = a0 + a.rot * (time - a.t0);
+          const steps = Math.ceil(a.len / 0.6);
+          for (let i = 1; i <= steps; i++) {
+            const d = (i / steps) * a.len;
+            const x = p.x + Math.cos(ang) * d, z = p.z + Math.sin(ang) * d;
+            ents.glowL.push(x, 0.8, z, a.width * 3.2, a.width * 3.2, fx.glow, false, c[0] * 0.5 * k, c[1] * 0.5 * k, c[2] * 0.5 * k, 1);
+            ents.glowL.push(x, 0.8, z, a.width * 1.4, a.width * 1.4, fx.glow, false, 1.2 * k, 1.2 * k, 1.1 * k, 1);
+          }
+        }
+      } else if (a.type === 'cone') {
+        const c = a.vis === 'fire' ? [1.6, 0.7, 0.2] : [0.6, 0.9, 1.6];
+        if (Math.random() < 0.9) for (let i = 0; i < 4; i++) {
+          const ang = a.angle + (Math.random() - 0.5) * a.arc;
+          const sp = a.len * (1.6 + Math.random() * 0.8);
+          P.spawn({ kind: 'flame', x: p.x + Math.cos(ang) * 0.6, y: 0.8, z: p.z + Math.sin(ang) * 0.6, vx: Math.cos(ang) * sp, vz: Math.sin(ang) * sp, vy: 0.4, life: 0.42, size: 0.35, size1: 1.0, r: c[0], g: c[1], b: c[2], a: 1, a1: 0, drag: 1.5, floor: false });
+        }
+      } else if (a.type === 'buff') {
+        const pulse = 0.5 + 0.3 * Math.sin(time * 6);
+        ents.flatL.push(p.x, 0.05, p.z, 1.8, 1.6, fx.ring, false, 1.3 * pulse, 0.9 * pulse, 0.3 * pulse, 1, 0, 0, time * 2);
+        if (Math.random() < dt * 6) P.spawn({ kind: 'note', x: p.x + (Math.random() - 0.5), y: 1.6, z: p.z, vy: 1.2, life: 0.8, size: 0.4, size1: 0.2, r: 1.4, g: 1.1, b: 0.5, floor: false });
+      }
+    }
+    this.actives.length = w;
+    // falling arrows / hail and fissure eruptions
+    w = 0;
+    for (const d of this.drops) {
+      if (time > d.at + 0.05) {
+        if (!d.done) {
+          d.done = true;
+          if (d.vis === 'earth') {
+            this.add(new Ground(K.SCORCH, d.x, d.z, d.r, d.r, { dur: 1.2, normal: true, color: C('#2a1e14'), fadeOut: 0.5, order: 1, y: 0.025 }));
+            P.burst(6, { kind: 'shard', add: false, x: d.x, y: 0.2, z: d.z, life: 0.5, size: 0.4, size1: 0.2, r: 0.55, g: 0.42, b: 0.3, speed: 2, up: 6, grav: 16, spin: 8 });
+            P.burst(3, { kind: 'smoke', add: false, x: d.x, y: 0.3, z: d.z, life: 0.6, size: 0.7, size1: 0.2, r: 0.5, g: 0.42, b: 0.35, speed: 1, up: 1, drag: 2 });
+            if (this.hooks.shake) this.hooks.shake(0.05, d.x, d.z);
+          } else {
+            const hail = d.vis === 'hail';
+            P.burst(3, { kind: hail ? 'shard' : 'spark', add: true, x: d.x, y: 0.1, z: d.z, life: 0.25, size: 0.3, size1: 0.05, r: hail ? 0.7 : 1.2, g: hail ? 1 : 1, b: hail ? 1.6 : 0.6, speed: 2, up: 2 });
+          }
+        }
+        if (time > d.at + (d.vis === 'earth' ? 0.35 : 0.6)) continue;
+      }
+      this.drops[w++] = d;
+      if (d.vis === 'earth') {
+        if (time >= d.t0) {
+          const k = Math.min(1, (time - d.t0) / 0.12);
+          ents.projL.push(d.x, 0.3 + k * 0.6, d.z, d.r * 1.2, d.r * 1.4 * k, fx.shard, false, 0.6, 0.48, 0.36, 1, 0, 0, 0);
+        }
+        continue;
+      }
+      // falling projectile: from the sky to the ground at its moment
+      const k = Math.max(0, Math.min(1, (time - d.t0) / 0.35));
+      const landed = time >= d.at;
+      const y = landed ? 0.15 : (1 - k) * 9 + 0.2;
+      const rect = d.vis === 'hail' ? fx.shard : fx.bolt;
+      const tint = d.vis === 'hail' ? [0.75, 0.95, 1.1] : [1, 1, 1];
+      if (time >= d.t0) ents.projL.push(d.x + (1 - k) * 2.2, y, d.z - (1 - k) * 1.0, d.vis === 'hail' ? 0.6 : 0.9, d.vis === 'hail' ? 0.6 : 0.9, rect, false, tint[0], tint[1], tint[2], landed ? Math.max(0, 1 - (time - d.at) / 0.6) : 1, 0, 0, landed ? -1.2 : -1.9);
+    }
+    this.drops.length = w;
+    // traps on the ground
+    for (const [, m] of this.mineMap) {
+      const armed = time - m.t0 > 0.45;
+      ents.itemL.push(m.x, 0.02, m.z, 0.9, 0.9, fx.trap, false, 1, 1, 1, 1, armed && Math.floor(time * 3) % 2 ? 0.4 : 0, 0, 0);
+    }
   }
 
   quake(x, z, speed, max) {
@@ -358,7 +530,7 @@ export class WeaponFX {
           for (let i = 0; i < ws.amount; i++) {
             const a = ang + (i / ws.amount) * Math.PI * 2;
             const x = p.x + Math.cos(a) * R * st.k, z = p.z + Math.sin(a) * R * st.k;
-            ents.projL.push(x, 0.75, z, size, size, this.fx.chakram, false, 1, 1, 1, 1, 0, 0, -time * 14);
+            ents.projL.push(x, 0.75, z, size, size, ws.vis === 'sword' ? this.fx.edge : this.fx.chakram, false, 1, 1, 1, 1, 0, 0, ws.vis === 'sword' ? a + Math.PI / 2 : -time * 14);
             ents.glowL.push(x, 0.75, z, size * 1.6, size * 1.6, this.fx.glow, false, ws.evolved ? 0.9 : 0.6, ws.evolved ? 0.55 : 0.5, ws.evolved ? 0.9 : 0.2, 1);
             if (!paused && Math.random() < dt * 10) this.P.spawn({ kind: 'dot', x, y: 0.75, z, life: 0.25, size: 0.3, size1: 0, r: 1.2, g: 1, b: 0.4, floor: false });
           }
@@ -405,9 +577,9 @@ export class WeaponFX {
         if (g.fadeOut && g.dur - g.t < g.fadeOut) a *= Math.max(0, (g.dur - g.t) / g.fadeOut);
         g.uni.uAlpha.value = a;
       }
-      if (g.bubbleK && !paused && Math.random() < dt * 8) {
+      if (g.bubbleK && !paused && Math.random() < dt * (g.r > 1.2 ? 8 : 3)) {
         const a = Math.random() * Math.PI * 2, r = g.r * 0.7 * Math.sqrt(Math.random());
-        this.P.spawn({ kind: 'bubble', x: g.mesh.position.x + Math.cos(a) * r, y: 0.08, z: g.mesh.position.z + Math.sin(a) * r, vy: 0.7, life: 0.6, size: 0.24, size1: 0.12, r: g.bubbleK[0], g: g.bubbleK[1], b: g.bubbleK[2], floor: false });
+        this.P.spawn({ kind: g.bubbleKind || 'bubble', x: g.mesh.position.x + Math.cos(a) * r, y: 0.08, z: g.mesh.position.z + Math.sin(a) * r, vy: 0.7, life: 0.6, size: 0.24, size1: 0.12, r: g.bubbleK[0], g: g.bubbleK[1], b: g.bubbleK[2], floor: false });
       }
     }
     this.grounds.length = w;
@@ -440,6 +612,7 @@ export class WeaponFX {
       }
     }
     this.meteors.length = w;
+    this.updateActives(ctx);
     // glow bursts (drawn through the entity glow layer)
     w = 0;
     for (const f of this.flashes) {
@@ -473,6 +646,9 @@ export class WeaponFX {
     this.bolts.length = 0;
     this.flashes.length = 0;
     this.meteors.length = 0;
+    this.actives.length = 0;
+    this.drops.length = 0;
+    this.mineMap.clear();
     this.auras.clear();
     this.revives.clear();
     this.lanes.clear();

@@ -119,7 +119,7 @@ wss.on('connection', (ws) => {
       }
       case 'join': {
         if (!g) return;
-        const res = g.addPlayer(client.id, msg.name, msg.c, msg.meta);
+        const res = g.addPlayer(client.id, msg.name, msg.c, msg.meta, msg.unlocks);
         if (!res.ok) { send(ws, { t: 'nojoin', slot: msg.slot, why: res.why }); return; }
         client.players.add(res.id);
         send(ws, { t: 'joined', slot: msg.slot, id: res.id });
@@ -138,7 +138,7 @@ wss.on('connection', (ws) => {
         if (g && client.players.has(msg.id)) g.toggleReady(msg.id, msg.v);
         break;
       case 'meta':
-        if (g && client.players.has(msg.id)) g.setMeta(msg.id, msg.ranks);
+        if (g && client.players.has(msg.id)) g.setMeta(msg.id, msg.ranks, msg.unlocks);
         break;
       case 'set':
         if (g) g.setSetting(client.id, String(msg.key), msg.val);
@@ -154,6 +154,12 @@ wss.on('connection', (ws) => {
       case 'lobby':
         if (g) g.backToLobby(client.id);
         break;
+      case 'pause':
+        if (g) g.setPause(client.id, !!msg.v);
+        break;
+      case 'abandon':
+        if (g) g.abandon(client.id);
+        break;
       case 'ping':
         send(ws, { t: 'pong', c: msg.c });
         break;
@@ -163,6 +169,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const r = client.room;
     if (!r) return;
+    r.game.dropPause(client.id);
     for (const id of client.players) r.game.removePlayer(id);
     r.clients.delete(client);
     updateHost(r);

@@ -241,6 +241,20 @@ export class Audio {
     this.noise(t, 0.12, { type: 'lowpass', freq: 600, gain: gain * 0.5, out });
   }
 
+  setVolumes(master, music, sfx) {
+    this.volume.master = master * 0.7;
+    this.volume.music = music * 0.75;
+    this.volume.sfx = sfx;
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    this.master.gain.setTargetAtTime(this.volume.master, now, 0.05);
+    this.sfxBus.gain.setTargetAtTime(this.volume.sfx, now, 0.05);
+    if (this.song && !this.pending) {
+      this.musicBus.gain.cancelScheduledValues(now);
+      this.musicBus.gain.setTargetAtTime(Math.max(0.0001, this.volume.music * (this.song.vol || 1)), now, 0.05);
+    }
+  }
+
   // ---------------------------------------------------------------- music
   music(name, stage = 0) {
     this.want = [name, stage];

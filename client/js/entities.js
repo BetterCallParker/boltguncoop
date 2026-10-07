@@ -23,6 +23,22 @@ const PROJ = {
   axe: { rect: 'axe', size: 1.1, spin: -15 },
   wisp: { rect: 'wisp', size: 0.9, glow: [0.35, 0.85, 1.5], glowS: 1.4, trail: [0.4, 0.9, 1.4], trailN: 0.03 },
   flask: { rect: 'flask', size: 0.8, spin: 9 },
+  hexorb: { rect: 'hexorb', size: 0.8, spin: 6, glow: [1.0, 0.4, 1.4], glowS: 1.4 },
+  bone: { rect: 'bone', size: 0.8, dir: true },
+  pellet: { rect: 'pellet', size: 0.5, dir: true, trail: [1, 0.85, 0.5], trailN: 0.05 },
+  icespear: { rect: 'icespear', size: 1.0, dir: true, glow: [0.5, 0.9, 1.5], glowS: 1.1 },
+  spear: { rect: 'spear', size: 1.45, dir: true },
+  shuriken: { rect: 'shuriken', size: 0.8, spin: 22 },
+  frostorb: { rect: 'frostorb', size: 1.1, spin: 3, glow: [0.5, 0.9, 1.6], glowS: 2.2, trail: [0.7, 0.95, 1.5], trailN: 0.04, snow: true },
+  shard: { rect: 'shard', size: 0.55, dir: true, tint: [0.65, 0.9, 1.0] },
+  ball: { rect: 'ball', size: 1.2, spin: 5, glow: [0.6, 0.85, 1.7], glowS: 2.6, crackle: true },
+  spark: { rect: 'spark', size: 0.6, spin: 14, tint: [1, 0.95, 0.6], glow: [1.4, 1.2, 0.5], glowS: 1.0, trail: [1.2, 1.1, 0.5], trailN: 0.03 },
+  bee: { rect: 'bee', size: 0.6, dir: true },
+  feather: { rect: 'feather', size: 0.85, dir: true, glow: [0.7, 0.9, 1.4], glowS: 1.0 },
+  hammer: { rect: 'hammer', size: 1.0, spin: -12, glow: [1.4, 1.1, 0.4], glowS: 1.4 },
+  shell: { rect: 'shell', size: 0.7, dir: true, trail: [0.6, 0.55, 0.5], trailN: 0.04 },
+  void: { rect: 'void', size: 1.0, spin: 1.5, glow: [0.8, 0.3, 1.4], glowS: 2.0, swirl: true },
+  wind: { rect: 'wind', size: 1.0, spin: 9, swirl: true },
 };
 const SHOT = { orb: { rect: 'eorb', glow: [1.2, 0.35, 1.4] }, dark: { rect: 'dark', glow: [1.5, 0.3, 1.1] } };
 
@@ -37,6 +53,7 @@ export class Entities {
     // atlases
     const ea = buildEnemyAtlas();
     this.etypes = ea.types;
+    this.minionTypes = ea.minions;
     this.etex = pixTexture(ea.canvas);
     const fa = buildFxAtlas();
     this.fx = fa.rects;
@@ -130,8 +147,8 @@ export class Entities {
       this.projs.set(id, { kind, x: px, z: pz, sx: px, sz: pz, tx, tz, t0: snapTime - 0.033, life: flight, pid, flask: true, rot: 0, trailT: 0 });
       return;
     }
-    const [, , , x, z, vx, vz, life, pid] = e;
-    this.projs.set(id, { kind, x, z, sx: x, sz: z, vx, vz, t0: snapTime - 0.033, life, pid, rot: Math.random() * 6, trailT: 0, off: null });
+    const [, , , x, z, vx, vz, life, pid, r] = e;
+    this.projs.set(id, { kind, x, z, sx: x, sz: z, vx, vz, t0: snapTime - 0.033, life, pid, r: r || 0.3, rot: Math.random() * 6, trailT: 0, off: null });
   }
 
   projectileGone(id) {
@@ -160,6 +177,7 @@ export class Entities {
   }
 
   number(x, y, z, val, style) {
+    if (this.showNumbers === false && style !== 'hurt' && style !== 'heal') return;
     if (this.nums.length > 260) this.nums.shift();
     this.nums.push({ x, y, z, val: String(Math.round(val)), t: 0, style });
   }
@@ -202,6 +220,7 @@ export class Entities {
     if (!paused) this.animT += dt;
     this.frameNo++;
     if (br) this.drawEnemies(br, rt, dt, time);
+    if (br) this.drawMinions(br, time, ctx);
     this.drawCorpses(dt);
     this.drawGems(ctx);
     this.drawPickups(ctx);
@@ -240,7 +259,8 @@ export class Entities {
       const fps = T.fps * ((flags & EF.SLOW) ? 0.5 : 1);
       const fr = frozen ? s.frame : Math.floor(this.animT * fps + a.id * 0.37) % T.rects.length;
       const rect = T.rects[fr];
-      const scale = def.boss ? 1.2 : 1;
+      const tier = a.tier || 1;
+      const scale = (def.boss ? 1.2 : 1) * TIER_SCALE[tier];
       let w = (rect.w / PPU) * scale, h = (rect.h / PPU) * scale;
       if (s.squash > 0) {
         s.squash -= dt;
@@ -258,7 +278,12 @@ export class Entities {
       const flash = (flags & EF.FLASH) || s.flash > 0 ? 1 : 0;
       const frost = frozen ? 1 : (flags & EF.SLOW) ? 0.35 : 0;
       s.x = x; s.z = z; s.y = Math.max(0, y); s.w = w; s.h = h; s.frame = fr; s.flip = flip;
-      L.push(x, y, z, w, h, rect, flip, 1, 1, 1, rise < 1 ? 0.3 + rise * 0.7 : 1, flash, frost, 0);
+      const tint = TIER_TINT[tier];
+      L.push(x, y, z, w, h, rect, flip, tint[0], tint[1], tint[2], rise < 1 ? 0.3 + rise * 0.7 : 1, flash, frost, 0);
+      if (tier === 3) {
+        const pulse = 0.5 + 0.2 * Math.sin(time * 4 + a.id);
+        this.flatL.push(x, 0.04, z, def.r * 2.6 * scale, def.r * 2.2 * scale, this.fx.ring, false, 0.9 * pulse, 0.12 * pulse, 0.5 * pulse, 1);
+      }
       const bs = Math.max(0.9, def.r * 2.3) * (def.fly ? 0.75 : 1);
       this.blobL.push(x, 0.03, z + 0.05, bs, bs * 0.5, FULL, false, 1, 1, 1, 0.9 * rise);
       if (def.elite || def.boss) {
@@ -276,6 +301,31 @@ export class Entities {
     }
     // forget enemies not drawn for a while
     if (fn % 60 === 0) for (const [id, s] of this.seen) if (fn - s.fn > 90) this.seen.delete(id);
+  }
+
+  // summoned allies (skeletons, wolves, turrets), interpolated like the horde
+  drawMinions(br, time, ctx) {
+    const [A, B, f] = br;
+    const la = A.json.mn, lb = B.json.mn;
+    if (!la) return;
+    if (lb && !B.mnIdx) B.mnIdx = new Map(lb.map((r) => [r[0], r]));
+    for (const a of la) {
+      const b = B.mnIdx && B.mnIdx.get(a[0]);
+      let x = a[2], z = a[3];
+      if (b) { x += (b[2] - a[2]) * f; z += (b[3] - a[3]) * f; }
+      const T = this.minionTypes[a[1]] || this.minionTypes.skeleton;
+      if (!T) continue;
+      const fr = a[1] === 'turret' ? Math.floor(this.animT * T.fps) % T.rects.length : Math.floor(this.animT * T.fps + a[0] * 0.37) % T.rects.length;
+      const rect = T.rects[fr];
+      const sc = a[1] === 'skeleton' ? 0.85 : 1;
+      const w = (rect.w / PPU) * sc, h = (rect.h / PPU) * sc;
+      const tint = a[1] === 'skeleton' ? [0.75, 1.05, 1.15] : [1, 1, 1];
+      this.enemyL.push(x, 0, z, w, h, rect, a[4] === 1, tint[0], tint[1], tint[2], 1, 0, 0, 0);
+      this.blobL.push(x, 0.03, z + 0.04, w * 0.7, w * 0.35, FULL, false, 1, 1, 1, 0.7);
+      const c = ctx.playerColor ? ctx.playerColor(a[5]) : null;
+      if (c) this.flatL.push(x, 0.04, z, w * 0.9, w * 0.75, this.fx.ring, false, c.r * 0.5, c.g * 0.5, c.b * 0.5, 1);
+      if (a[1] !== 'turret' && Math.random() < 0.05) this.particles.spawn({ kind: 'dot', x: x + (Math.random() - 0.5) * 0.6, y: 0.3 + Math.random() * h, z, vy: 0.6, life: 0.6, size: 0.18, size1: 0, r: 0.5, g: 0.9, b: 1.2, floor: false });
+    }
   }
 
   drawCorpses(dt) {
@@ -383,8 +433,25 @@ export class Entities {
       p.x = x; p.z = z;
       if (!paused) p.rot += (def.spin || 0) * dt;
       const rot = def.dir ? screenAngle(p.vx, p.vz) : p.rot;
-      this.projL.push(x, y, z, def.size, def.size, this.fx[def.rect], false, 1, 1, 1, Math.min(1, age * 20 + 0.3), 0, 0, rot);
+      if (def.swirl) {
+        // gravity wells and cyclones: a churning disc on the ground plus debris
+        const R = p.r || 1.5;
+        const c = p.kind === 'void' ? [0.7, 0.25, 1.2] : [0.75, 0.9, 1.05];
+        this.flatL.push(x, 0.05, z, R * 2, R * 1.8, this.fx.ring, false, c[0] * 0.8, c[1] * 0.8, c[2] * 0.8, 1, 0, 0, -this.animT * 3);
+        this.flatL.push(x, 0.06, z, R * 1.3, R * 1.15, this.fx.ring, false, c[0] * 0.6, c[1] * 0.6, c[2] * 0.6, 1, 0, 0, this.animT * 5);
+        if (!paused && Math.random() < dt * 30) {
+          const a = Math.random() * 6.28, rr = R * (0.4 + Math.random() * 0.6);
+          this.particles.spawn({ kind: p.kind === 'void' ? 'dot' : 'leaf', add: p.kind === 'void', x: x + Math.cos(a) * rr, y: 0.3 + Math.random(), z: z + Math.sin(a) * rr, vx: -Math.sin(a) * 4, vz: Math.cos(a) * 4, vy: p.kind === 'void' ? -0.5 : 1.5, life: 0.5, size: 0.3, size1: 0.05, r: c[0], g: c[1], b: c[2], drag: 2, floor: false });
+        }
+        if (p.kind === 'wind') { for (let k = 0; k < 3; k++) this.projL.push(x, 0.5 + k * 0.7, z, R * (0.8 + k * 0.35), R * 0.5, this.fx.wind, false, 1, 1, 1, 0.85, 0, 0, this.animT * (8 + k * 3)); }
+        else this.projL.push(x, 0.6, z, R * 0.7, R * 0.7, this.fx.void, false, 1, 1, 1, 1, 0, 0, this.animT * 2);
+        if (def.glow) this.glowL.push(x, 0.6, z, R * 2.2, R * 2.2, this.fx.glow, false, def.glow[0] * 0.4, def.glow[1] * 0.4, def.glow[2] * 0.4, 1);
+        continue;
+      }
+      const tint = def.tint || [1, 1, 1];
+      this.projL.push(x, y, z, def.size, def.size, this.fx[def.rect], false, tint[0], tint[1], tint[2], Math.min(1, age * 20 + 0.3), 0, 0, rot);
       if (def.glow) this.glowL.push(x, y, z, def.glowS, def.glowS, this.fx.glow, false, def.glow[0] * 0.55, def.glow[1] * 0.55, def.glow[2] * 0.55, 1);
+      if (def.crackle && !paused && Math.random() < dt * 12) this.particles.spawn({ kind: 'spark', x: x + (Math.random() - 0.5) * 1.2, y: y + (Math.random() - 0.5), z: z + (Math.random() - 0.5) * 1.2, life: 0.12, size: 0.35, size1: 0.1, r: 0.8, g: 1.1, b: 1.8, floor: false });
       if (def.trail && !paused) {
         p.trailT -= dt;
         if (p.trailT <= 0) {
@@ -457,3 +524,6 @@ export class Entities {
 }
 
 const FULL = { u: 0, v: 0, du: 1, dv: 1 };
+// evolved monsters: bigger, and tinted ember-red (tier 2) or void-violet (tier 3)
+const TIER_SCALE = [1, 1, 1.15, 1.3];
+const TIER_TINT = [[1, 1, 1], [1, 1, 1], [1.12, 0.86, 0.82], [0.86, 0.72, 1.12]];

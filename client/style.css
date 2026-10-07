@@ -380,3 +380,28 @@ img.pix, canvas.pix { image-rendering: pixelated; }
 .lb-gold { right: 58px !important; }
 .hud-kills { right: 58px !important; }
 .hud-xp .lv { right: 58px; }
+
+/* ---------------------------------------------------------------- options / pause menu */
+#modal { position: absolute; inset: 0; z-index: 45; display: flex; align-items: center; justify-content: center; background: radial-gradient(ellipse at center, rgba(8, 8, 24, 0.55), rgba(3, 3, 10, 0.85)); }
+.opt { width: min(620px, 94vw); max-height: 90vh; display: flex; flex-direction: column; }
+.opt h2 { text-align: center; font-size: 26px; letter-spacing: 8px; }
+.opt-sub { text-align: center; font-style: italic; color: var(--dim); margin: -4px 0 8px; }
+.opt-list { overflow-y: auto; padding-right: 4px; min-height: 0; }
+.opt-sec { font-family: var(--title); font-size: 12px; letter-spacing: 4px; color: var(--gold); text-transform: uppercase; margin: 10px 0 4px; border-bottom: 1px solid rgba(217, 180, 90, 0.3); padding-bottom: 3px; }
+.opt-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 8px; border: 1px solid transparent; }
+.opt-row.focus { border-color: var(--gold); background: linear-gradient(90deg, rgba(217, 180, 90, 0.2), rgba(217, 180, 90, 0.04)); }
+.opt-row .ol { display: flex; flex-direction: column; min-width: 0; }
+.opt-row .on { font-family: var(--title); font-size: 15px; letter-spacing: 1px; }
+.opt-row .oh { font-size: 14px; font-style: italic; color: var(--dim); }
+.opt-row .oc { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.opt-row .arr { cursor: pointer; color: var(--gold); font-size: 12px; padding: 2px 4px; }
+.opt-row .arr:hover { color: #fff; }
+.opt-row input[type=range] { width: 150px; accent-color: #d9b45a; cursor: pointer; }
+.opt-row .val { font-family: var(--pix); font-size: 12px; color: var(--gold-hi); min-width: 46px; text-align: right; }
+.opt-row .val.wide { min-width: 80px; text-align: center; }
+.opt-row .tog { cursor: pointer; font-family: var(--pix); font-size: 12px; padding: 2px 12px; border: 1px solid rgba(217, 180, 90, 0.5); color: var(--dim); }
+.opt-row .tog.on { color: #120c1c; background: var(--gold-hi); }
+.opt-btns { display: flex; gap: 10px; justify-content: center; margin-top: 12px; }
+.opt-btns .btn.focus { box-shadow: 0 0 0 2px var(--gold-hi), 0 0 16px rgba(246, 220, 148, 0.5); }
+.opt-help { text-align: center; font-size: 14px; color: var(--dim); margin-top: 8px; }
+.opt-help b { color: var(--gold-hi); }

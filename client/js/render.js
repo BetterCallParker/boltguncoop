@@ -236,11 +236,12 @@ const GRADE = {
     flashColor: { value: new THREE.Color(1, 1, 1) },
     hurt: { value: 0 },
     desat: { value: 0 },
+    grainAmt: { value: 1 },
   },
   vertexShader: TILT.vertexShader,
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
-    uniform float time, vignette, warmth, saturation, contrast, flash, hurt, desat;
+    uniform float time, vignette, warmth, saturation, contrast, flash, hurt, desat, grainAmt;
     uniform vec3 flashColor;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -260,11 +261,11 @@ const GRADE = {
       // vignette
       vec2 q = vUv - 0.5;
       float v = smoothstep(0.85, 0.2, length(q * vec2(1.15, 1.0)));
-      col *= mix(1.0 - vignette, 1.0, v);
+      col *= mix(1.0 - vignette * grainAmt, 1.0, v);
       // hurt pulse (red edges)
       col = mix(col, vec3(0.75, 0.05, 0.08), hurt * (1.0 - v) * 0.5);
       // film grain
-      col += (hash(vUv * 1000.0 + time) - 0.5) * 0.028;
+      col += (hash(vUv * 1000.0 + time) - 0.5) * 0.028 * grainAmt;
       col = mix(col, flashColor, flash);
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
     }`,
@@ -273,6 +274,7 @@ const GRADE = {
 export class Renderer {
   constructor(canvas, quality = 'high') {
     this.quality = quality;
+    this.settings = { scale: 1, rays: 1, bloom: 1, dof: 1, shadows: true, grain: true };
     const r = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
     this.dpr = quality === 'low' ? 0.75 : Math.min(window.devicePixelRatio || 1, 1.5);
     r.setPixelRatio(this.dpr);
@@ -322,8 +324,25 @@ export class Renderer {
     for (const p of [this.tiltH, this.tiltV]) {
       p.uniforms.focus.value = focus;
       p.uniforms.band.value = band;
-      p.uniforms.amount.value = amount;
+      p.uniforms.amount.value = amount * this.settings.dof;
     }
+  }
+
+  // player options: { scale, rays, bloom, dof, shadows, grain }
+  applySettings(s) {
+    Object.assign(this.settings, s);
+    const base = this.quality === 'low' ? 0.75 : Math.min(window.devicePixelRatio || 1, 1.5);
+    this.dpr = Math.max(0.4, base * this.settings.scale);
+    this.r.setPixelRatio(this.dpr);
+    this.resize();
+    const sh = !!this.settings.shadows && this.quality !== 'low';
+    if (this.r.shadowMap.enabled !== sh) {
+      this.r.shadowMap.enabled = sh;
+      this.scene.traverse((o) => { if (o.material) for (const m of [].concat(o.material)) m.needsUpdate = true; });
+    }
+    this.bloom.enabled = this.settings.bloom > 0.01;
+    this.tiltH.enabled = this.tiltV.enabled = this.settings.dof > 0.01;
+    this.grade.uniforms.grainAmt.value = this.settings.grain ? 1 : 0;
   }
 
   render(time) {

@@ -13,6 +13,7 @@ import { Guild } from './guild.js';
 import { Audio } from './audio.js';
 import { RunView, isRunPhase } from './runview.js';
 import { townMove, townHeight, townPlace } from './townwalk.js';
+import { Options } from './options.js';
 
 const QUALITY = new URL(location.href).searchParams.get('q') || (window.matchMedia && matchMedia('(pointer: coarse)').matches ? 'low' : 'high');
 const R = new Renderer(document.getElementById('game'), QUALITY);
@@ -33,6 +34,10 @@ function setZoom(z) {
   clearTimeout(zoomSave);
   zoomSave = setTimeout(() => { try { localStorage.setItem('lb_zoom', String(view.zoom.toFixed(2))); } catch { /* ignore */ } }, 400);
 }
+view.setZoom = (z) => setZoom(z);
+const options = new Options({ R, audio, view, sfx: (n) => audio.play(n) });
+options.onAbandon = () => net.send({ t: 'abandon' });
+options.onClose = () => { if (app.mode === 'run') net.send({ t: 'pause', v: false }); };
 const zoomEl = document.getElementById('zoomind');
 let zoomHide = 0;
 function showZoom() {
@@ -244,7 +249,7 @@ window.addEventListener('pointerdown', () => audio.unlock());
 // ------------------------------------------------------------------ camp scene (title + lobby)
 world.setStage(0, { town: true });
 world.setTimeOfDay(0.46);
-run = new RunView({ R, world, net, input, audio, guild, local, app, toast, view });
+run = new RunView({ R, world, net, input, audio, guild, local, app, toast, view, options });
 const campViews = new Map(); // key -> TravelerView
 const campPos = new Map(); // player id -> { x, z, dx, dz, tx, tz } (local travelers walk, others glide to reports)
 const camLook = new THREE.Vector3(0, 1.0, -6.4);
@@ -405,8 +410,31 @@ function lobbyCtx() {
 }
 
 // ------------------------------------------------------------------ input routing
+// every local device's menu presses combined (the options menu listens to all of them)
+function allMenus() {
+  const m = input.menu('kb');
+  for (const i of input.claimed) {
+    const g = input.menu('gp:' + i);
+    for (const k of Object.keys(m)) m[k] = m[k] || g[k];
+  }
+  return m;
+}
+
 function handleMenus() {
   const pads = input.pads();
+  if (app.mode === 'lobby' || app.mode === 'run') {
+    if (options.open) {
+      options.handle(allMenus());
+      return;
+    }
+    const lobbyBusy = app.mode === 'lobby' && [...local.keys()].some((id) => lobby.state(id).mode !== 'pick');
+    const want = (input.keyPressed('Escape') && !lobbyBusy) || pads.some((gp) => input.padPressed(gp.index, PAD.VIEW) || (app.mode === 'run' && input.padPressed(gp.index, PAD.MENU)));
+    if (want) {
+      options.show({ inRun: app.mode === 'run', isHost: app.host === net.cid });
+      if (app.mode === 'run') net.send({ t: 'pause', v: true });
+      return;
+    }
+  }
   if (app.mode === 'title') {
     const tp = document.getElementById('titlepads');
     if (pads.length && !tp.dataset.found) {

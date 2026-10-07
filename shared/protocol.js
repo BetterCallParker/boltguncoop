@@ -3,7 +3,7 @@
 //  u8   type (1)
 //  u32  tick
 //  f32  originX, originZ            enemy positions are quantized relative to this point
-//  u16  enemy count, then per enemy: u16 id, u8 type, u8 flags, i16 qx, i16 qz   (q = units * 32)
+//  u16  enemy count, then per enemy: u16 id, u8 type (+ tier in bits 6-7), u8 flags, i16 qx, i16 qz   (q = units * 32)
 //  u16  bar count, then per entry:   u16 id, u8 hp fraction (0-255)   (elites / bosses)
 //  u16  damage count, then:          u16 enemy id, u16 amount (bit 15 = big hit)
 //  u16  kill count, then:            u16 enemy id
@@ -32,7 +32,7 @@ export function encodeSnapshot(s) {
   v.setUint16(o, n, true); o += 2;
   for (const e of s.enemies) {
     v.setUint16(o, e.id, true);
-    v.setUint8(o + 2, e.type);
+    v.setUint8(o + 2, (e.type & 63) | (((e.tier || 1) - 1) << 6)); // top 2 bits: evolution tier
     v.setUint8(o + 3, e.flags);
     v.setInt16(o + 4, clampQ((e.x - s.ox) * Q), true);
     v.setInt16(o + 6, clampQ((e.z - s.oz) * Q), true);
@@ -76,9 +76,11 @@ export function decodeSnapshot(buf) {
   const n = v.getUint16(o, true); o += 2;
   const enemies = new Array(n);
   for (let i = 0; i < n; i++) {
+    const tb = v.getUint8(o + 2);
     enemies[i] = {
       id: v.getUint16(o, true),
-      type: v.getUint8(o + 2),
+      type: tb & 63,
+      tier: (tb >> 6) + 1,
       flags: v.getUint8(o + 3),
       x: ox + v.getInt16(o + 4, true) / Q,
       z: oz + v.getInt16(o + 6, true) / Q,

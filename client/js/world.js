@@ -940,7 +940,7 @@ export class World {
     this.scene.background = this.bgColor || (this.bgColor = new THREE.Color());
     this.scene.background.setHex(L.fog);
     this.R.r.toneMappingExposure = L.exposure;
-    this.R.bloom.strength = L.bloom;
+    this.R.bloom.strength = L.bloom * (this.R.settings ? this.R.settings.bloom : 1);
     this.R.bloom.threshold = st === 'frost' ? 0.95 : 0.82;
     this.R.grade.uniforms.warmth.value = L.warmth;
     this.lanternK = L.lantern;
@@ -971,7 +971,7 @@ export class World {
     for (const f of this.animated) f(t, dt);
     // volumetric sun shafts + drifting mist banks
     if (this.R.vol) {
-      this.R.vol.strength = L.rays * (this.town ? 0.35 : this.stage.props === 'crypt' ? 0.5 : 0.6);
+      this.R.vol.strength = L.rays * (this.town ? 0.35 : this.stage.props === 'crypt' ? 0.5 : 0.6) * (this.R.settings ? this.R.settings.rays : 1);
       this.R.vol.color.setHex(L.sun).lerp(new THREE.Color(1, 0.9, 0.7), 0.4);
       this.R.vol.density = 0.085;
       this.R.vol.falloff = 0.05;

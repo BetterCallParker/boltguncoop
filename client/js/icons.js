@@ -1,5 +1,6 @@
 // 16x16 pixel icons for weapons, relics and pickups (used by the HUD, level-up cards and the world).
 import { Pix, ramp, shade } from './pixel.js';
+import { WEAPONS } from '/shared/items.js';
 
 const METAL = ramp('#c3cbdc');
 const GOLD = ramp('#e8c050');
@@ -134,11 +135,69 @@ const DRAW = {
   gold: (p) => DRAW.coin(p),
 };
 
+// glyphs for the wider arsenal, keyed by an ability's look (vis)
+const GLYPH = {
+  bone: (p) => { p.line(3, 12, 12, 3, '#efe6d0'); p.line(4, 12, 13, 3, '#fffaf0'); p.ellipse(3, 12.5, 1.8, 1.8, '#efe6d0'); p.ellipse(12.5, 3.5, 1.8, 1.8, '#fffaf0'); },
+  skeleton: (p) => DRAW.skull(p),
+  wolf: (p) => { p.ellipse(8, 10, 3.5, 3, '#9ad0ff'); for (const [x, y] of [[4, 5], [7, 3.5], [10, 3.5], [13, 5]]) p.ellipse(x, y, 1.6, 1.8, '#9ad0ff'); },
+  turret: (p) => { p.ellipse(8, 8, 5.5, 5.5, '#c8a050'); p.ellipse(8, 8, 2.2, 2.2, '#4a4040'); for (let a = 0; a < 6.28; a += 0.785) p.rect(7.5 + Math.cos(a) * 6, 7.5 + Math.sin(a) * 6, 2, 2, '#c8a050'); },
+  hammer: (p) => { p.line(3, 13, 9, 7, '#8a5a32'); p.poly([[6, 2], [13, 1], [15, 7], [9, 8]], '#f0c84a'); p.line(13, 1, 15, 7, '#fff4c0'); },
+  arrow: (p) => { for (const x of [4, 8, 12]) { p.line(x, 1, x, 11, '#d8c8a0'); p.poly([[x - 2, 10], [x + 2, 10], [x, 14]], '#dfe6f2'); } },
+  hail: (p) => flake(p),
+  lightning: (p) => bolt(p, '#9ad8ff', '#ffffff'),
+  holy: (p) => { p.rect(7, 1, 2, 14, '#fff4c0'); p.rect(3, 5, 10, 2, '#fff4c0'); p.rect(7, 1, 1, 14, '#ffffff'); },
+  sun: (p) => { p.ellipse(8, 8, 4, 4, '#ffd24a'); for (let a = 0; a < 6.28; a += 0.785) p.line(8 + Math.cos(a) * 5, 8 + Math.sin(a) * 5, 8 + Math.cos(a) * 7, 8 + Math.sin(a) * 7, '#fff0a0'); },
+  fire: (p) => { p.poly([[8, 1], [13, 8], [12, 13], [8, 15], [4, 13], [3, 8], [6, 9]], '#ff6a1f'); p.poly([[8, 6], [10.5, 10], [8, 14], [5.5, 10]], '#ffd24a'); },
+  plague: (p) => { for (const [x, y, r] of [[5, 9, 3.5], [10, 8, 4], [8, 5, 3]]) p.ellipse(x, y, r, r * 0.85, '#7aa84a'); p.ellipse(6, 10, 1.4, 1.4, '#c87aee'); p.ellipse(11, 7, 1.2, 1.2, '#c87aee'); },
+  void: (p) => { p.ellipse(8, 8, 6, 6, '#3a1a5a'); for (let a = 0; a < 9; a += 0.2) p.set(8 + Math.cos(a) * a * 0.7, 8 + Math.sin(a) * a * 0.7, '#c08aff'); p.ellipse(8, 8, 1.4, 1.4, '#000000'); },
+  wind: (p) => { for (let k = 0; k < 3; k++) for (let a = 0; a < 5; a += 0.12) p.set(8 + Math.cos(a + k * 2.1) * (1.5 + a), 8 + Math.sin(a + k * 2.1) * (1 + a * 0.8), k ? '#d8f4ff' : '#ffffff'); },
+  axe: (p) => axe(p),
+  shuriken: (p) => { p.poly([[8, 1], [9.5, 6.5], [15, 8], [9.5, 9.5], [8, 15], [6.5, 9.5], [1, 8], [6.5, 6.5]], '#b8c0d4'); p.ellipse(8, 8, 1.5, 1.5, '#3a3a4a'); },
+  frostorb: (p) => orb(p, '#4aa8ff', '#9ad8ff', '#ffffff'),
+  ball: (p) => { orb(p, '#6ab0ff', '#d8f0ff', '#ffffff'); p.line(1, 3, 4, 6, '#ffffff'); p.line(15, 12, 12, 10, '#ffffff'); },
+  spark: (p) => { p.rect(7, 2, 2, 12, '#ffe45a'); p.rect(2, 7, 12, 2, '#ffe45a'); p.rect(6, 6, 4, 4, '#ffffff'); },
+  trap: (p) => { p.ellipse(8, 9, 6.5, 4, '#5a5464'); p.ellipse(8, 9, 4.5, 2.4, '#2a2632'); for (let x = 2; x <= 14; x += 2) { p.set(x, 6, '#c8c2d2'); p.set(x, 12, '#c8c2d2'); } p.ellipse(8, 9, 1.4, 1, '#ff5a3a'); },
+  hex: (p) => { for (let a = 0; a < 6.28; a += 0.08) p.set(8 + Math.cos(a) * 6, 8 + Math.sin(a) * 6, '#b05aff'); p.poly([[8, 3], [12, 11], [3, 6], [13, 6], [4, 11]], '#d08aff'); },
+  quake: (p) => { p.poly([[1, 13], [5, 9], [7, 11], [10, 6], [15, 13]], '#8a6a4a'); p.line(8, 2, 6, 8, '#ffcf8a'); p.line(6, 8, 9, 9, '#ffcf8a'); },
+  icespear: (p) => { p.line(2, 14, 13, 3, '#9ad8ff'); p.line(3, 14, 14, 3, '#e8faff'); p.poly([[11, 2], [15, 1], [14, 5]], '#ffffff'); },
+  spear: (p) => { p.line(2, 14, 12, 4, '#b8864a'); p.poly([[10, 3], [15, 1], [13, 6]], '#dfe6f2'); },
+  blood: (p) => { p.poly([[8, 1], [13, 9], [11, 14], [5, 14], [3, 9]], '#c0203a'); p.ellipse(6.5, 10, 1.4, 2, '#ff8a9a'); },
+  pellet: (p) => { for (const [x, y] of [[5, 5], [10, 4], [12, 9], [6, 11], [9, 8]]) p.ellipse(x, y, 1.8, 1.8, '#8a8a96'); },
+  shout: (p) => { for (const r of [3, 5.5, 7.5]) for (let a = -0.9; a <= 0.9; a += 0.08) p.set(3 + Math.cos(a) * r, 8 + Math.sin(a) * r, r === 3 ? '#ffffff' : '#fff0a0'); },
+  song: (p) => { p.ellipse(5, 12, 2.6, 2, '#ffe08a'); p.line(7, 12, 7, 3, '#ffe08a'); p.ellipse(11, 10, 2.6, 2, '#ffe08a'); p.line(13, 10, 13, 2, '#ffe08a'); p.line(7, 3, 13, 2, '#ffe08a'); },
+  feather: (p) => DRAW.feather(p),
+  sword: (p) => sword(p),
+  bee: (p) => { p.ellipse(8, 9, 4.5, 3.5, '#f0c83a'); p.rect(6.5, 6, 1.2, 6, '#2a2018'); p.rect(9.5, 6, 1.2, 6, '#2a2018'); p.ellipse(6, 4.5, 2.6, 1.8, '#e8f6ff'); p.ellipse(10.5, 4.5, 2.6, 1.8, '#e8f6ff'); },
+  thorn: (p) => { p.line(2, 14, 14, 2, '#5a8a2a'); for (let k = 3; k < 14; k += 3) { p.set(k + 1, 14 - k, '#e8d8a0'); p.set(k - 1, 16 - k - 2, '#e8d8a0'); } p.ellipse(13, 3, 2, 2, '#c84a6a'); },
+  earth: (p) => { p.poly([[2, 14], [5, 6], [7, 14]], '#8a6a4a'); p.poly([[6, 14], [9, 3], [12, 14]], '#a8845a'); p.poly([[11, 14], [13, 8], [15, 14]], '#8a6a4a'); },
+};
+const ELEM = {
+  bone: '#4a4438', skeleton: '#3a3448', wolf: '#24345a', turret: '#4a3a24', hammer: '#4a3a14', arrow: '#2a3a24', hail: '#1a3a5a', lightning: '#1a2a5a', holy: '#5a4a1a',
+  sun: '#5a3a10', fire: '#5a1a0a', plague: '#2a3a14', void: '#1a0a2a', wind: '#2a4a5a', axe: '#3a2a2a', shuriken: '#22222e', frostorb: '#14345a', ball: '#1a2a5a',
+  spark: '#4a4010', trap: '#3a2a20', hex: '#2a0a3a', quake: '#3a2a18', icespear: '#14345a', spear: '#3a2a1a', blood: '#3a0a14', pellet: '#2a2a32', shout: '#4a3a1a',
+  song: '#4a3010', feather: '#24345a', sword: '#2a2a3a', bee: '#3a3010', thorn: '#1e3a14', earth: '#3a2a18',
+};
+
+function abilityIcon(p, id) {
+  const w = WEAPONS[id];
+  const g = GLYPH[w.vis] || GLYPH.spark;
+  p.ellipse(8, 8, 7.5, 7.5, ELEM[w.vis] || '#2a2a3a');
+  g(p);
+  if (w.evolved) {
+    for (let a = 0; a < 6.28; a += 0.05) p.set(8 + Math.cos(a) * 7.4, 8 + Math.sin(a) * 7.4, '#f6dc94');
+    p.poly([[13, 0], [14, 2], [16, 2], [14.5, 3.5], [15, 5.5], [13, 4.5], [11, 5.5], [11.5, 3.5], [10, 2], [12, 2]], '#ffe45a');
+  }
+}
+
+DRAW.goblet = (p) => { p.poly([[3, 2], [13, 2], [11, 8], [5, 8]], '#e8c050'); p.rect(7, 8, 2, 4, '#c8a040'); p.rect(4, 12, 8, 2, '#e8c050'); p.ellipse(8, 4, 3, 1.2, '#8a1a2a'); };
+DRAW.ankh = (p) => { p.ellipse(8, 5, 3, 3.5, '#ffb03a'); p.ellipse(8, 5, 1.4, 2, null); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (Math.hypot((x + 0.5 - 8) / 1.4, (y + 0.5 - 5) / 2) < 1) p.clear(x, y); p.rect(7, 8, 2, 7, '#ffb03a'); p.rect(4, 9, 8, 2, '#ffb03a'); p.set(9, 3, '#fff0a0'); };
+
 const cache = new Map();
 export function iconPix(id) {
   if (cache.has(id)) return cache.get(id);
   const p = new Pix(16, 16);
-  (DRAW[id] || DRAW.gem1)(p);
+  if (!DRAW[id] && WEAPONS[id]) abilityIcon(p, id);
+  else (DRAW[id] || DRAW.gem1)(p);
   p.outline('#120c1c', 0.25);
   p.rim(0.12, 0.1);
   cache.set(id, p);
