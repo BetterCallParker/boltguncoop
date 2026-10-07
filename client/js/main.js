@@ -6,12 +6,14 @@ import { Renderer } from './render.js';
 import { World } from './world.js';
 import { TravelerView } from './actors.js';
 import { Net } from './net.js';
+import { LocalNet } from './localnet.js';
 import { Input, PAD } from './input.js';
 import { Lobby } from './lobby.js';
 import { Guild } from './guild.js';
 import { Audio } from './audio.js';
+import { RunView, isRunPhase } from './runview.js';
 
-const QUALITY = new URL(location.href).searchParams.get('q') || 'high';
+const QUALITY = new URL(location.href).searchParams.get('q') || (window.matchMedia && matchMedia('(pointer: coarse)').matches ? 'low' : 'high');
 const R = new Renderer(document.getElementById('game'), QUALITY);
 const world = new World(R);
 const input = new Input();
@@ -36,13 +38,19 @@ const pendingJoins = new Set();
 
 const lobby = new Lobby({ send: (m) => net.send(m), sfx: (n) => audio.play(n), guild });
 lobby.onJoinClick = () => requestJoin('kb');
+let run = null;
 
-const net = new Net({
+const OFFLINE = window.LB_OFFLINE || new URL(location.href).searchParams.has('offline');
+const handlers = {
   on_welcome(m) {
     app.room = m.room;
-    const url = new URL(location.href);
-    url.searchParams.set('room', m.room);
-    history.replaceState(null, '', url);
+    if (!net.offline) {
+      try {
+        const url = new URL(location.href);
+        url.searchParams.set('room', m.room);
+        history.replaceState(null, '', url);
+      } catch { /* sandboxed page: keep the URL as is */ }
+    }
     for (const slot of pendingJoins) sendJoin(slot);
     enterLobby();
   },
@@ -59,7 +67,14 @@ const net = new Net({
         local.delete(id);
       }
     }
-    if (prevPhase !== m.phase) onPhase(m.phase, prevPhase);
+    if (prevPhase !== m.phase || (isRunPhase(m.phase) && app.mode === 'lobby')) onPhase(m.phase, prevPhase);
+    run.onRoster();
+  },
+  on_choices(m) {
+    run.onChoices(m);
+  },
+  on_state(m) {
+    run.onState(m);
   },
   on_joined(m) {
     pendingJoins.delete(m.slot);
@@ -78,7 +93,19 @@ const net = new Net({
   onClose() {
     toast('Lost connection to the camp. Refresh to reconnect.');
   },
-});
+  onFail() {
+    // no camp server here: host the expedition inside the browser instead
+    goOffline();
+    toast('No camp server found - starting an offline expedition (solo or couch co-op).', 4500);
+    net.connect(app.room, app.name);
+  },
+};
+let net = OFFLINE ? new LocalNet(handlers) : new Net(handlers);
+function goOffline() {
+  net = new LocalNet(handlers);
+  if (run) run.net = net;
+  window.__lb.net = net;
+}
 
 function sendJoin(slot) {
   const first = joinedSlots.size === 0 && [...pendingJoins][0] === slot;
@@ -87,13 +114,39 @@ function sendJoin(slot) {
 
 function requestJoin(slot) {
   if (joinedSlots.has(slot) || pendingJoins.has(slot)) return;
+  if (app.mode === 'run') return;
   if ([...app.roster.values()].length >= MAX_PLAYERS) return;
   pendingJoins.add(slot);
   if (net.connected && app.mode !== 'title') sendJoin(slot);
 }
 
 function onPhase(ph) {
-  if (ph === PHASE.LOBBY) enterLobby();
+  if (isRunPhase(ph)) {
+    if (app.mode === 'lobby') enterRun();
+  } else if (app.mode === 'run') exitRun();
+  else if (ph === PHASE.LOBBY && app.mode === 'lobby') enterLobby();
+}
+
+function clearCamp() {
+  for (const v of campViews.values()) {
+    R.scene.remove(v.root);
+    v.dispose();
+  }
+  campViews.clear();
+}
+
+function enterRun() {
+  app.mode = 'run';
+  lobby.show(false);
+  clearCamp();
+  run.start();
+}
+
+function exitRun() {
+  run.stop();
+  world.setStage(0, { town: true });
+  world.setTimeOfDay(0.46);
+  enterLobby();
 }
 
 function toast(text, ms = 3200) {
@@ -131,6 +184,7 @@ window.addEventListener('pointerdown', () => audio.unlock());
 // ------------------------------------------------------------------ camp scene (title + lobby)
 world.setStage(0, { town: true });
 world.setTimeOfDay(0.46);
+run = new RunView({ R, world, net, input, audio, guild, local, app, toast });
 const CAMP_SPOTS = [[-1.0, 1.6], [1.1, 1.5], [-2.7, 0.8], [2.6, 0.7], [-4.2, -0.2], [4.1, -0.3]];
 const campViews = new Map(); // key -> TravelerView
 const camLook = new THREE.Vector3(0, 1.0, -6.4);
@@ -200,6 +254,7 @@ function updateCamp(dt, t) {
 function enterLobby() {
   app.mode = 'lobby';
   lobby.show(true);
+  audio.music('town');
 }
 
 function lobbyCtx() {
@@ -246,8 +301,8 @@ function frame(now) {
   time += dt;
   input.poll();
   handleMenus();
-  input.endFrame();
   if (app.mode === 'preview') updatePreview(dt, time);
+  else if (app.mode === 'run') run.update(dt, time);
   else if (app.mode === 'title' || app.mode === 'lobby') {
     if (app.mode === 'lobby') {
       app.phaseT += dt;
@@ -255,6 +310,7 @@ function frame(now) {
     }
     updateCamp(dt, time);
   }
+  input.endFrame();
   R.render(time);
 }
 requestAnimationFrame(frame);
@@ -310,4 +366,4 @@ function updatePreview(dt, t) {
   world.update(dt, t, f.x, f.z);
 }
 
-window.__lb = { app, net, local, R, world, lobby, guild, input, preview };
+window.__lb = { app, net, local, R, world, lobby, guild, input, preview, run, audio };

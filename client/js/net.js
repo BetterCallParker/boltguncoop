@@ -21,6 +21,7 @@ export class Net {
     this.ws.binaryType = 'arraybuffer';
     this.ws.onopen = () => {
       this.connected = true;
+      this.opened = true;
       this.send({ t: 'hello', room, name });
       this.pingTimer = setInterval(() => this.send({ t: 'ping', c: performance.now() }), 1000);
     };
@@ -45,6 +46,7 @@ export class Net {
     this.ws.onclose = () => {
       this.connected = false;
       clearInterval(this.pingTimer);
+      if (!this.opened) { if (this.h.onFail) this.h.onFail(); return; }
       if (this.h.onClose) this.h.onClose();
     };
   }

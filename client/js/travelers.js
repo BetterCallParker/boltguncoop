@@ -22,10 +22,12 @@ function skinRamp(hex) {
   return { hi: mix(shade(hex, 1.12), '#fff2e0', 0.25), base: hex, mid: mix(shade(hex, 0.86), '#c0504a', 0.16), dark: mix(shade(hex, 0.66), '#7a2a3a', 0.25) };
 }
 
-class Doll {
-  constructor() {
-    this.p = new Pix(FW, FH);
-    this.ids = new Int16Array(FW * FH).fill(-1);
+export class Doll {
+  constructor(w = FW, h = FH) {
+    this.W = w;
+    this.H = h;
+    this.p = new Pix(w, h);
+    this.ids = new Int16Array(w * h).fill(-1);
     this.parts = [];
   }
 
@@ -41,9 +43,9 @@ class Doll {
   put(x, y, col, id) {
     x = Math.round(x);
     y = Math.round(y);
-    if (x < 0 || y < 0 || x >= FW || y >= FH) return;
+    if (x < 0 || y < 0 || x >= this.W || y >= this.H) return;
     this.p.set(x, y, col);
-    if (id !== undefined) this.ids[y * FW + x] = id;
+    if (id !== undefined) this.ids[y * this.W + x] = id;
   }
 
   // shaded ellipsoid
@@ -119,6 +121,7 @@ class Doll {
 
   // interior ink: the front part gets a dark line where it overlaps a part behind it
   finish(outline = true) {
+    const FW = this.W, FH = this.H;
     const src = new Int16Array(this.ids);
     const at = (x, y) => (x < 0 || y < 0 || x >= FW || y >= FH ? -1 : src[y * FW + x]);
     const marks = [];

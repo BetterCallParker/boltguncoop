@@ -262,7 +262,7 @@ const GRADE = {
       float v = smoothstep(0.85, 0.2, length(q * vec2(1.15, 1.0)));
       col *= mix(1.0 - vignette, 1.0, v);
       // hurt pulse (red edges)
-      col = mix(col, vec3(0.75, 0.05, 0.08), hurt * (1.0 - v) * 0.7);
+      col = mix(col, vec3(0.75, 0.05, 0.08), hurt * (1.0 - v) * 0.5);
       // film grain
       col += (hash(vUv * 1000.0 + time) - 0.5) * 0.028;
       col = mix(col, flashColor, flash);

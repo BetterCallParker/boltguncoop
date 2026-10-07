@@ -12,12 +12,15 @@
 </style>
 </head>
 <body>
+<h2>Monsters</h2><div class="row" id="mon"></div>
+<h2>FX &amp; pickups</h2><div class="row" id="fx"></div>
 <h2>Travelers</h2><div id="trav"></div>
 <h2>Props</h2><div class="row" id="props"></div>
 <h2>Textures</h2><div class="row" id="tex"></div>
 <script type="module">
 import { travelerSheet, treeSprite, grassTuft, flowerSprite, campfireSheet, lanternPost, groundTexture, stoneBrickTexture, portraitCanvas } from './js/sprites.js';
 import { CHARACTERS } from '/shared/characters.js';
+import { buildEnemyAtlas, buildFxAtlas } from './js/monsters.js';
 const up = (cv, s) => { const c = document.createElement('canvas'); c.width = cv.width * s; c.height = cv.height * s; const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(cv, 0, 0, c.width, c.height); return c; };
 const trav = document.getElementById('trav');
 CHARACTERS.forEach((ch, i) => {
@@ -27,6 +30,21 @@ CHARACTERS.forEach((ch, i) => {
   const l = document.createElement('div'); l.className = 'lab'; l.textContent = ch.name + ' - ' + ch.title; row.appendChild(l);
   trav.appendChild(row);
 });
+const mon = document.getElementById('mon');
+const atlas = buildEnemyAtlas();
+atlas.types.forEach((t) => {
+  const box = document.createElement('div');
+  for (const r of t.rects) {
+    const c = document.createElement('canvas'); c.width = r.w * 3; c.height = r.h * 3;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false;
+    const sy = atlas.H - (r.v * atlas.H) - r.h;
+    g.drawImage(atlas.canvas, r.u * atlas.W, sy, r.w, r.h, 0, 0, r.w * 3, r.h * 3);
+    box.appendChild(c);
+  }
+  const l = document.createElement('div'); l.className = 'lab'; l.textContent = t.id; box.appendChild(l);
+  mon.appendChild(box);
+});
+document.getElementById('fx').appendChild(up(buildFxAtlas().canvas, 4));
 const props = document.getElementById('props');
 for (const [k, pal] of [['oak', 'summer'], ['oak', 'autumn'], ['pine', 'summer'], ['pine', 'snow'], ['dead', 'x'], ['bush', 'summer']]) props.appendChild(up(treeSprite(k, 3, pal).toCanvas(), 3));
 props.appendChild(up(campfireSheet().toCanvas(), 3));

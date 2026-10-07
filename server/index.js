@@ -16,6 +16,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const STATIC = [
   ['/vendor/three/', path.join(ROOT, 'node_modules/three/')],
   ['/shared/', path.join(ROOT, 'shared/')],
+  ['/server/', path.join(ROOT, 'server/')], // the simulation also runs in-browser for offline play
   ['/', path.join(ROOT, 'client/')],
 ];
 const MIME = {
@@ -112,6 +113,7 @@ wss.on('connection', (ws) => {
         r.clients.add(client);
         updateHost(r);
         send(ws, { t: 'welcome', cid: client.id, room: code, tickRate: TICK_RATE, maxPlayers: MAX_PLAYERS });
+        if (r.game.run) send(ws, r.game.run.fullState());
         r.game.rosterDirty = true;
         break;
       }

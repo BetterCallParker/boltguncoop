@@ -27,6 +27,56 @@ export class Input {
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
     window.addEventListener('blur', () => this.keys.clear());
+    this.initTouch();
+  }
+
+  // touch: drag anywhere outside the menus for a floating thumbstick (drives the 'kb' slot)
+  initTouch() {
+    this.touch = { id: null, ox: 0, oy: 0, x: 0, y: 0 };
+    const base = document.createElement('div');
+    const knob = document.createElement('div');
+    base.style.cssText = 'position:fixed;width:110px;height:110px;margin:-55px 0 0 -55px;border-radius:50%;border:2px solid rgba(246,220,148,.55);background:rgba(10,12,26,.25);pointer-events:none;z-index:60;display:none';
+    knob.style.cssText = 'position:fixed;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(246,220,148,.6);pointer-events:none;z-index:61;display:none';
+    document.body.append(base, knob);
+    const UI = 'button, input, a, .card, [data-act], .lb-left, .lb-right, .lb-settings, .lb-party, .panel, .hud-res';
+    const show = (on) => { base.style.display = knob.style.display = on ? 'block' : 'none'; };
+    window.addEventListener('touchstart', (e) => {
+      for (const f of this.listeners) f();
+      if (this.touch.id !== null) return;
+      for (const t of e.changedTouches) {
+        if (t.target && t.target.closest && t.target.closest(UI)) continue;
+        Object.assign(this.touch, { id: t.identifier, ox: t.clientX, oy: t.clientY, x: t.clientX, y: t.clientY });
+        base.style.left = t.clientX + 'px'; base.style.top = t.clientY + 'px';
+        knob.style.left = t.clientX + 'px'; knob.style.top = t.clientY + 'px';
+        show(true);
+        break;
+      }
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) {
+        if (t.identifier !== this.touch.id) continue;
+        this.touch.x = t.clientX;
+        this.touch.y = t.clientY;
+        const [x, y] = this.touchVec();
+        knob.style.left = this.touch.ox + x * 50 + 'px';
+        knob.style.top = this.touch.oy + y * 50 + 'px';
+        if (e.cancelable) e.preventDefault();
+      }
+    }, { passive: false });
+    const end = (e) => {
+      for (const t of e.changedTouches) if (t.identifier === this.touch.id) { this.touch.id = null; show(false); }
+    };
+    window.addEventListener('touchend', end);
+    window.addEventListener('touchcancel', end);
+  }
+
+  touchVec() {
+    const T = this.touch;
+    if (!T || T.id === null) return [0, 0];
+    const x = (T.x - T.ox) / 50, y = (T.y - T.oy) / 50;
+    const l = Math.hypot(x, y);
+    if (l < 0.15) return [0, 0];
+    return l > 1 ? [x / l, y / l] : [x, y];
   }
 
   onActivity(f) { this.listeners.push(f); }
@@ -83,6 +133,9 @@ export class Input {
       if (k('KeyD') || k('ArrowRight')) x += 1;
       if (k('KeyW') || k('ArrowUp')) z -= 1;
       if (k('KeyS') || k('ArrowDown')) z += 1;
+      const [tx, tz] = this.touchVec();
+      x += tx;
+      z += tz;
       const l = Math.hypot(x, z);
       return l > 1 ? [x / l, z / l] : [x, z];
     }

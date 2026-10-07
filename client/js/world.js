@@ -43,7 +43,9 @@ export function spriteMaterial(tex, emissive = 0.14, fade = false) {
         .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
           vec2 dd = vBase.xz - uFocus.xz;
           if (vBase.z > uFocus.z - 1.0 && length(dd * vec2(0.8, 1.0)) < uFadeR) {
-            if (mod(floor(gl_FragCoord.x) + floor(gl_FragCoord.y), 2.0) < 1.0) discard;
+            float near = 1.0 - length(dd * vec2(0.8, 1.0)) / uFadeR;
+            vec2 q = mod(floor(gl_FragCoord.xy), 2.0);
+            if (near > 0.35 ? (q.x + q.y > 0.5) : (mod(q.x + q.y, 2.0) < 1.0)) discard;
           }`);
     };
     m.customProgramCacheKey = () => 'stipple';
@@ -765,7 +767,7 @@ export class World {
   // invisible leaf silhouettes high above the ground: they only cast shadows (dappled sunlight)
   canopyCaster(x, z, size, seed) {
     if (!this.canopyTex) this.canopyTex = [1, 2, 3].map((k) => new THREE.CanvasTexture(canopyCanvas(128, k * 13)));
-    const tex = this.canopyTex[seed % 3];
+    const tex = this.canopyTex[Math.abs(Math.floor(seed * 7)) % 3];
     const m = new THREE.Mesh(new THREE.PlaneGeometry(size, size), new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }));
     m.rotation.x = -Math.PI / 2;
     m.rotation.z = seed;
