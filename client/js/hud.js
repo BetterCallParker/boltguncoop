@@ -2,7 +2,7 @@
 // boss bar, story banners, off-screen markers, per-local-player level-up cards (keyboard,
 // controller or mouse), the treasure chest reveal and the end-of-journey results.
 import { CHARACTERS } from '/shared/characters.js';
-import { WEAPONS, PASSIVES, maxLevel } from '/shared/items.js';
+import { WEAPONS, PASSIVES, maxLevel, passiveDesc } from '/shared/items.js';
 import { ENEMIES, ENEMY_IDS } from '/shared/enemies.js';
 import { SEAT_COLORS, PS, fmtTime } from '/shared/constants.js';
 import { portraitCanvas, fullSpriteCanvas } from './sprites.js';
@@ -38,7 +38,7 @@ export function optionInfo(o) {
   }
   if (o.k === 'p') {
     const d = PASSIVES[o.id];
-    return { icon: iconURL(o.id, 3), name: d.name, lvl: o.new ? 'New!' : `Lv ${o.lvl}`, desc: d.desc, hint: '', kind: 'Relic' };
+    return { icon: iconURL(o.id, 3), name: d.name, lvl: o.new ? 'New!' : `Lv ${o.lvl}`, desc: passiveDesc(o.id), hint: '', kind: 'Relic' };
   }
   if (o.k === 'gold') return { icon: iconURL('bag', 3), name: 'Gold Pouch', lvl: '', desc: `Gain ${o.v || 25} gold.`, hint: '', kind: 'Boon' };
   return { icon: iconURL('roast', 3), name: 'Hearty Roast', lvl: '', desc: `Recover ${o.v || 40} HP.`, hint: '', kind: 'Boon' };
