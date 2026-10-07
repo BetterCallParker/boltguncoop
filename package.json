@@ -1,0 +1,24 @@
+{
+  "name": "lanternbound",
+  "version": "1.0.0",
+  "description": "Lanternbound: a co-op (1-6 players) HD-2D survivors game. Node.js authoritative server + three.js browser client.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test test/*.test.js",
+    "demo": "node scripts/build-demo.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "three": "^0.186.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
+}
