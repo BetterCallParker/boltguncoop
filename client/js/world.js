@@ -104,7 +104,12 @@ const LIGHT = {
 };
 const STAGE_TINT = {
   verdant: { day: {}, dusk: {}, night: {} },
-  frost: { day: { sun: 0xf0f6ff, sky: 0xc8dcff, ground: 0x8a9ab8, fog: 0xd8e4f4 }, dusk: { sun: 0xffb0a0, sky: 0x9a8ad8, fog: 0x8a8ac0 }, night: { sun: 0x8ab0ff, fog: 0x1e2a50 } },
+  // snow throws light back: a softer, cooler sun, less bloom/haze and fog pushed back so it stays readable
+  frost: {
+    day: { sun: 0xe9f0ff, sunI: 1.8, sky: 0x96acd4, ground: 0x506080, hemiI: 0.72, fog: 0x95a7c8, fogN: 60, fogF: 160, exposure: 0.93, bloom: 0.1, warmth: -0.04, rays: 0.3 },
+    dusk: { sun: 0xffa890, sunI: 1.4, sky: 0x6a6aa8, ground: 0x3a3a5a, hemiI: 0.55, fog: 0x5a5a90, fogN: 48, fogF: 130, exposure: 0.92, bloom: 0.16, warmth: -0.02, rays: 0.3 },
+    night: { sun: 0x8ab0ff, sunI: 0.45, sky: 0x24305a, fog: 0x18223e, bloom: 0.3, warmth: -0.04 },
+  },
   crypt: { day: { sun: 0xffc090, sunI: 1.2, sky: 0x8a6a8a, ground: 0x3a2028, hemiI: 0.7, fog: 0x4a2a3a, fogN: 22, fogF: 66 }, dusk: { sun: 0xff7a4a, sunI: 1.0, sky: 0x6a3a5a, fog: 0x3a1a2a }, night: { sun: 0xff6a3a, sunI: 0.4, sky: 0x3a1a3a, fog: 0x1a0a14 } },
 };
 
@@ -305,6 +310,7 @@ export class World {
     this.rockMat = new THREE.MeshLambertMaterial({ map: pixTexture(rockTexture(32, 2 + index)), flatShading: true });
     this.pathTex = pixTexture(pathTexture(64, 160, 3 + index));
     this.pathMat = new THREE.MeshLambertMaterial({ map: this.pathTex, transparent: true, alphaTest: 0.5 });
+    if (pal === 'frost') this.pathMat.color.set(0x8f9cbc); // trampled snow rather than sand
     this.woodMat = new THREE.MeshLambertMaterial({ map: this.woodTex });
 
     // billboard batches
@@ -928,12 +934,14 @@ export class World {
     this.hemi.groundColor.setHex(L.ground);
     this.hemi.intensity = L.hemiI;
     this.scene.fog.color.setHex(L.fog);
-    this.scene.fog.near = L.fogN;
-    this.scene.fog.far = L.fogF;
+    const zf = Math.max(0, (this.zoom || 1) - 1);
+    this.scene.fog.near = L.fogN + zf * 30;
+    this.scene.fog.far = L.fogF + zf * 45;
     this.scene.background = this.bgColor || (this.bgColor = new THREE.Color());
     this.scene.background.setHex(L.fog);
     this.R.r.toneMappingExposure = L.exposure;
     this.R.bloom.strength = L.bloom;
+    this.R.bloom.threshold = st === 'frost' ? 0.95 : 0.82;
     this.R.grade.uniforms.warmth.value = L.warmth;
     this.lanternK = L.lantern;
     // the sun comes from the front-left so sprites facing the camera are lit, shadows fall behind
@@ -967,7 +975,7 @@ export class World {
       this.R.vol.color.setHex(L.sun).lerp(new THREE.Color(1, 0.9, 0.7), 0.4);
       this.R.vol.density = 0.085;
       this.R.vol.falloff = 0.05;
-      this.R.vol.haze = 0.012;
+      this.R.vol.haze = st === 'frost' ? 0.004 : 0.012;
       this.R.vol.gapCut = 0.6;
     }
     // trees in front of the party turn see-through
@@ -977,7 +985,7 @@ export class World {
       this.mist.children.forEach((m, k) => {
         const d = m.userData;
         m.position.x = d.x + Math.sin(t * d.sp + d.ph) * 2.5;
-        m.material.opacity = d.o * (0.75 + 0.25 * Math.sin(t * 0.2 + d.ph));
+        m.material.opacity = d.o * (0.75 + 0.25 * Math.sin(t * 0.2 + d.ph)) * (st === 'frost' ? 0.45 : 1);
         m.material.color.setHex(L.fog).lerp(new THREE.Color(1, 1, 1), 0.35);
       });
     }

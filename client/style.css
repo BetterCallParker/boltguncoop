@@ -363,3 +363,20 @@ img.pix, canvas.pix { image-rendering: pixelated; }
 .res-foot { margin-top: 22px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .res-foot .wait { font-style: italic; color: var(--dim); font-size: 18px; }
 .res-foot .auto { font-size: 14px; color: var(--dim); }
+
+/* ---------------------------------------------------------------- fullscreen + zoom */
+.fsbtn { position: absolute; top: 22px; right: 12px; z-index: 50; width: 34px; height: 34px; padding: 0; cursor: pointer; background: rgba(14, 17, 36, 0.8); border: 1px solid var(--gold); border-radius: 3px; box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4); }
+.fsbtn:hover { background: rgba(40, 46, 90, 0.9); box-shadow: 0 0 12px rgba(246, 220, 148, 0.35); }
+.fsbtn:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 2px; }
+.fsbtn span, .fsbtn span::before, .fsbtn span::after { position: absolute; display: block; width: 9px; height: 9px; border: 2px solid var(--gold-hi); content: ''; }
+.fsbtn span { left: 6px; top: 6px; border-right: 0; border-bottom: 0; }
+.fsbtn span::before { left: 15px; top: -2px; border-left: 0; border-bottom: 0; }
+.fsbtn span::after { left: -2px; top: 15px; border-right: 0; border-top: 0; }
+.fsbtn::after { content: ''; position: absolute; right: 6px; bottom: 6px; width: 9px; height: 9px; border: 2px solid var(--gold-hi); border-left: 0; border-top: 0; }
+.fsbtn.on span, .fsbtn.on::after { transform: scale(0.75); }
+#zoomind { position: absolute; top: 64px; right: 12px; z-index: 50; padding: 3px 10px; font-family: var(--pix); font-size: 12px; color: var(--gold-hi); background: rgba(14, 17, 36, 0.85); border: 1px solid rgba(217, 180, 90, 0.6); opacity: 0; transition: opacity 0.25s; pointer-events: none; }
+#zoomind.on { opacity: 1; }
+.lb-room { right: 58px !important; }
+.lb-gold { right: 58px !important; }
+.hud-kills { right: 58px !important; }
+.hud-xp .lv { right: 58px; }

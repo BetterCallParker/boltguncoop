@@ -93,6 +93,8 @@ export class LocalNet {
         const buf = this.game.snapshot();
         if (buf) this.onSnap(decodeSnapshot(buf));
       }
+      const ph = this.game.phase;
+      if ((ph === 'lobby' || ph === 'countdown') && this.tick % 3 === 0 && this.game.players.size) this.post(this.game.lobbyState());
     }
   }
 

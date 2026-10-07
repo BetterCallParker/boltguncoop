@@ -180,7 +180,7 @@ export function groundTexture(kind = 'grass', size = 256, seed = 3) {
   const r = rnd(seed * 101);
   const pal = {
     grass: ['#4a5e2a', '#566a30', '#627636', '#6e823c', '#7c8e44'],
-    snow: ['#b9c8e0', '#c8d6ea', '#d8e3f2', '#e6eef8', '#f4f8ff'],
+    snow: ['#6f7f9e', '#7c8cab', '#8999b6', '#96a6c1', '#a3b2cb'],
     stone: ['#3a3444', '#463f52', '#524a5e', '#5e566a', '#6a6276'],
     dirt: ['#7a6444', '#88704c', '#957c54', '#a2885c', '#ae9464'],
   }[kind];
@@ -217,7 +217,7 @@ export function groundTexture(kind = 'grass', size = 256, seed = 3) {
   } else if (kind === 'snow') {
     for (let i = 0; i < size * 2; i++) {
       const x = Math.floor(r() * size), y = Math.floor(r() * size);
-      p.set(x, y, r() < 0.5 ? '#ffffff' : '#a8b8d4');
+      p.set(x, y, r() < 0.5 ? '#d8e4f6' : '#5e6e8e');
     }
   } else if (kind === 'stone') {
     // flagstones with mortar lines

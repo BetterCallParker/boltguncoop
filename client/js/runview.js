@@ -4,7 +4,7 @@
 // server, which validates it. Everything streamed is routed to entities, weapon effects, the
 // HUD and audio from here.
 import * as THREE from 'three';
-import { PHASE, PS, BASE_MOVE_SPEED, VIEW_HX, VIEW_HZ, SEAT_COLORS } from '/shared/constants.js';
+import { PHASE, PS, BASE_MOVE_SPEED, SEAT_COLORS } from '/shared/constants.js';
 import { CHARACTERS } from '/shared/characters.js';
 import { WEAPONS, PASSIVES, weaponStats } from '/shared/items.js';
 import { ENEMIES, ENEMY_IDS } from '/shared/enemies.js';
@@ -31,8 +31,8 @@ export function isRunPhase(ph) {
 }
 
 export class RunView {
-  constructor({ R, world, net, input, audio, guild, local, app, toast }) {
-    Object.assign(this, { R, world, net, input, audio, guild, local, app, toast });
+  constructor({ R, world, net, input, audio, guild, local, app, toast, view }) {
+    Object.assign(this, { R, world, net, input, audio, guild, local, app, toast, view });
     this.active = false;
     this.hud = new Hud({ send: (m) => net.send(m), sfx: (n) => audio.play(n) });
     this.hud.onAction = (a) => { if (a === 'lobby') net.send({ t: 'lobby' }); };
@@ -223,6 +223,7 @@ export class RunView {
         hud.banner(def ? def.name : 'A great foe', e[3] ? 'The endless night takes form. Survive until dawn!' : 'A great foe draws near!', 3.6);
         A.play('horn');
         A.music(e[3] ? 'final' : 'boss', this.stageIndex);
+        for (const L of this.local.values()) this.input.rumble(L.slot, 0.8, 0.4, 500);
         this.shake(0.3);
         break;
       }
@@ -244,6 +245,8 @@ export class RunView {
         p.hurtT = 0.18;
         ents.number(p.x, 2.2, p.z, e[2], 'hurt');
         if (p.local) {
+          const L = this.local.get(p.id);
+          if (L) this.input.rumble(L.slot, Math.min(1, 0.35 + e[2] * 0.03), 0.3, 130);
           this.hurtV = Math.min(0.75, this.hurtV + 0.2 + e[2] * 0.012);
           this.shake(0.12 + Math.min(0.25, e[2] * 0.01));
           A.play('hurt');
@@ -273,6 +276,7 @@ export class RunView {
       }
       case 'lvl':
         for (const p of this.players.values()) if (p.state === PS.ALIVE) fx.levelPillar(p.x, p.z);
+        for (const L of this.local.values()) this.input.rumble(L.slot, 0.2, 0.5, 220);
         A.play('levelup');
         break;
       case 'pick': {
@@ -540,9 +544,11 @@ export class RunView {
     }
     // couch co-op: everyone on this screen stays within the shared view
     if (alive.length > 1) {
+      const z = (this.view ? this.view.zoom : 1) * this.zoom;
+      const hx = 10.5 * z * Math.min(1.25, window.innerWidth / window.innerHeight / 1.78), up = 6.5 * z, down = 5.2 * z;
       for (const P of alive) {
-        P.x = Math.min(this.focus.x + VIEW_HX - 3.2, Math.max(this.focus.x - VIEW_HX + 3.2, P.x));
-        P.z = Math.min(this.focus.z + VIEW_HZ - 3.8, Math.max(this.focus.z - VIEW_HZ + 2.6, P.z));
+        P.x = Math.min(this.focus.x + hx, Math.max(this.focus.x - hx, P.x));
+        P.z = Math.min(this.focus.z + down, Math.max(this.focus.z - up, P.z));
       }
     }
     this.sendAcc += dt;
@@ -569,7 +575,7 @@ export class RunView {
       this.focus.x += (x - this.focus.x) * k;
       this.focus.z += (z - this.focus.z) * k;
       const spread = Math.max(maxx - minx, (maxz - minz) * 1.4);
-      const want = 1 + Math.max(0, Math.min(0.35, (spread - 10) * 0.03));
+      const want = 1 + Math.max(0, Math.min(0.25, (spread - 12) * 0.025));
       this.zoom += (want - this.zoom) * Math.min(1, dt * 2);
     }
     this.trauma = Math.max(0, this.trauma - dt * 1.4);
@@ -578,7 +584,9 @@ export class RunView {
     const oz = (Math.sin(time * 39.7) + Math.sin(time * 23.9)) * 0.2 * sh;
     const cam = this.R.camera;
     const f = this.focus;
-    cam.position.set(f.x + ox, CAM_H * this.zoom, f.z + CAM_Z * this.zoom + oz);
+    const zm = this.zoom * (this.view ? this.view.zoom : 1);
+    this.world.zoom = zm;
+    cam.position.set(f.x + ox, CAM_H * zm, f.z + CAM_Z * zm + oz);
     cam.lookAt(f.x + ox, 0, f.z - 0.6 + oz);
     this.R.setTilt(0.5, 0.2, 4.2);
   }

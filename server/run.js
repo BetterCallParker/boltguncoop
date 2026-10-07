@@ -250,7 +250,7 @@ export class Run {
     let a = this.rand() * Math.PI * 2;
     // bias toward where the party is heading so the horde meets you
     if (this.rand() < 0.35 && Math.hypot(p.dirx, p.dirz) > 0.1) a = Math.atan2(p.dirz, p.dirx) + (this.rand() - 0.5) * 1.6;
-    const k = 1.08 + this.rand() * 0.25 + far;
+    const k = 1.02 + this.rand() * 0.18 + far;
     return [p.x + Math.cos(a) * (VIEW_HX + 1.5) * k, p.z + Math.sin(a) * (VIEW_HZ + 1.5) * k];
   }
 

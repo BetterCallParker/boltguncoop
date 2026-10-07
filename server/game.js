@@ -1,5 +1,5 @@
 // Authoritative co-op game room: lobby (character select + ready up + host settings) and the run.
-import { DT, PHASE, PS, MAX_PLAYERS, clamp } from '../shared/constants.js';
+import { DT, PHASE, PS, MAX_PLAYERS, LOBBY_SPAWNS, LOBBY_SPEED, clamp } from '../shared/constants.js';
 import { CHARACTERS } from '../shared/characters.js';
 import { defaultSettings, SETTINGS } from '../shared/settings.js';
 import { sanitizeMeta } from '../shared/meta.js';
@@ -40,7 +40,8 @@ export class Game {
     const id = this.nextId++;
     const cleanName = String(name || '').replace(/[^\w \-'.!?]/g, '').trim().slice(0, 14) || `Traveler ${seat + 1}`;
     const ci = Number.isInteger(c) && c >= 0 && c < CHARACTERS.length ? c : seat % CHARACTERS.length;
-    this.players.set(id, { id, clientId, name: cleanName, char: ci, ready: false, seat, meta: sanitizeMeta(meta) });
+    const [lx, lz] = LOBBY_SPAWNS[seat] || [0, 0];
+    this.players.set(id, { id, clientId, name: cleanName, char: ci, ready: false, seat, meta: sanitizeMeta(meta), lx, lz, ldx: 0, ldz: 1, lt: this.time });
     if (this.phase === PHASE.COUNTDOWN) this.setPhase(PHASE.LOBBY);
     this.rosterDirty = true;
     return { ok: true, id };
@@ -144,12 +145,38 @@ export class Game {
 
   endRun() {
     this.run = null;
-    for (const p of this.players.values()) p.ready = false;
+    for (const p of this.players.values()) {
+      p.ready = false;
+      [p.lx, p.lz] = LOBBY_SPAWNS[p.seat] || [0, 0];
+      p.ldx = 0;
+      p.ldz = 1;
+    }
     this.setPhase(PHASE.LOBBY);
   }
 
   playerPos(id, x, z, fx, fz) {
     if (this.run) this.run.playerPos(id, +x, +z, +fx, +fz);
+    else if (this.phase === PHASE.LOBBY || this.phase === PHASE.COUNTDOWN) this.lobbyPos(id, +x, +z, +fx, +fz);
+  }
+
+  // walking around camp: positions come from each client, loosely speed-checked
+  lobbyPos(id, x, z, dx, dz) {
+    const p = this.players.get(id);
+    if (!p || !Number.isFinite(x) || !Number.isFinite(z)) return;
+    const el = clamp(this.time - p.lt, 0, 0.5);
+    p.lt = this.time;
+    const max = LOBBY_SPEED * el * 1.6 + 0.4;
+    let mx = clamp(x, -30, 30) - p.lx, mz = clamp(z, -24, 20) - p.lz;
+    const d = Math.hypot(mx, mz);
+    if (d > max) { mx *= max / d; mz *= max / d; }
+    p.lx += mx;
+    p.lz += mz;
+    if (Number.isFinite(dx) && Number.isFinite(dz)) { p.ldx = dx; p.ldz = dz; }
+  }
+
+  lobbyState() {
+    const r2 = (v) => Math.round(v * 100) / 100;
+    return { t: 'lp', p: [...this.players.values()].map((p) => [p.id, r2(p.lx), r2(p.lz), r2(p.ldx), r2(p.ldz)]) };
   }
 
   pick(id, i) {

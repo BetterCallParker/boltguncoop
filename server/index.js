@@ -201,6 +201,12 @@ setInterval(() => {
         const snap = room.game.snapshot();
         if (snap) for (const c of room.clients) send(c.ws, snap);
       }
+      // travelers strolling around camp (10 Hz)
+      const ph = room.game.phase;
+      if ((ph === 'lobby' || ph === 'countdown') && tick % 3 === 0 && room.game.players.size) {
+        const msg = JSON.stringify(room.game.lobbyState());
+        for (const c of room.clients) send(c.ws, msg);
+      }
     }
   }
 }, 5);

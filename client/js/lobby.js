@@ -99,12 +99,11 @@ export class Lobby {
       this.key = '';
       return;
     }
+    // in camp the stick / WASD walk; Q E or LB RB flip through the travelers
     let c = st.cursor;
     if (!r.ready) {
-      if (m.left) c = (c + CHARACTERS.length - 1) % CHARACTERS.length;
-      if (m.right) c = (c + 1) % CHARACTERS.length;
-      if (m.up) c = (c + CHARACTERS.length - 2) % CHARACTERS.length;
-      if (m.down) c = (c + 2) % CHARACTERS.length;
+      if (m.prev) c = (c + CHARACTERS.length - 1) % CHARACTERS.length;
+      if (m.next) c = (c + 1) % CHARACTERS.length;
       if (c !== st.cursor) {
         st.cursor = c;
         this.send({ t: 'char', id, c });
@@ -255,7 +254,7 @@ export class Lobby {
     // settings
     const set = el('div', 'lb-settings panel');
     set.appendChild(el('h2', '', 'Expedition'));
-    set.appendChild(el('div', 'hostline', ctx.isHost ? 'You lead the party. Press Tab / Y to change settings.' : `Led by ${ctx.hostName || '...'}`));
+    set.appendChild(el('div', 'hostline', ctx.isHost ? 'You lead the party. Tab / Y to change, or click the arrows.' : `Led by ${ctx.hostName || '...'}`));
     const editRow = states.find(([, st]) => st.mode === 'settings');
     SETTINGS.forEach((d, i) => {
       const row = el('div', 'set' + (editRow && editRow[1].setRow === i ? ' focus' : ''));
@@ -289,7 +288,7 @@ export class Lobby {
         slot.append(nm, el('div', 'pc', CHARACTERS[r.char].name), el('div', 'st', r.ready ? 'Ready' : 'Choosing...'));
         if (r.client === ctx.hostClient) slot.appendChild(el('div', 'crown', '♛'));
       } else {
-        const j = el('div', 'join', 'Press A / Enter to join');
+        const j = el('div', 'join', humans.some((h) => ctx.local.has(h.id)) ? 'Press Start on another controller' : 'Press Enter / A to join');
         j.dataset.act = 'join';
         slot.appendChild(j);
       }
@@ -310,7 +309,7 @@ export class Lobby {
     else status = `${readyN} / ${humans.length} ready`;
     actions.append(gbtn, ready, el('div', 'status', status));
     const hints = el('div', 'lb-hints');
-    for (const [k, v] of [['← → / Stick', 'Choose'], ['Space / A', 'Ready'], ['Tab / Y', 'Settings (leader)'], ['G / X', 'Guild'], ['Enter / A', 'Join (new device)']]) {
+    for (const [k, v] of [['WASD / Stick', 'Walk around camp'], ['Q E / LB RB', 'Choose traveler'], ['Space / A', 'Ready'], ['Tab / Y', 'Settings (leader)'], ['G / X', 'Guild'], ['Wheel / R-Stick', 'Zoom'], ['F', 'Fullscreen'], ['Start', 'Join on another controller']]) {
       const h = el('span');
       h.append(el('b', '', k), document.createTextNode(' ' + v));
       hints.appendChild(h);
